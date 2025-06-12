@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Nettoyage parties fantômes Firebase</title>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
+</head>
+<body>
+  <button onclick="cleanup()">Nettoyer parties fantômes</button>
+  <pre id="log"></pre>
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyC67w7K6BqcNkBh4yeNd4OfgvjAw_neO4k",
+      authDomain: "the-game-30e6d.firebaseapp.com",
+      databaseURL: "https://the-game-30e6d-default-rtdb.firebaseio.com",
+      projectId: "the-game-30e6d",
+      storageBucket: "the-game-30e6d.appspot.com",
+      messagingSenderId: "222102581853",
+      appId: "1:222102581853:web:a211cfbed9dadc3cfe13b4",
+      measurementId: "G-L2G22DJQFZ"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+    function cleanup() {
+      const PARTIE_TIMEOUT = 30 * 60 * 1000;
+      db.ref('parties').once('value').then(snapshot => {
+        const now = Date.now();
+        let count = 0;
+        snapshot.forEach(childSnap => {
+          const partie = childSnap.val();
+          const lastActive = partie.lastActive || 0;
+          if (now - lastActive > PARTIE_TIMEOUT) {
+            db.ref('parties/' + childSnap.key).remove();
+            document.getElementById('log').textContent += "Supprimé : " + childSnap.key + "\n";
+            count++;
+          }
+        });
+        if (count === 0) document.getElementById('log').textContent += "Aucune partie à supprimer.\n";
+      });
+    }
+  </script>
+</body>
+</html>
