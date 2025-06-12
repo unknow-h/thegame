@@ -1,18 +1,25 @@
+// Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
-import { getDatabase, ref, onValue, set, push, runTransaction, update } from "firebase/database";
+import { getAnalytics } from "firebase/analytics";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
 
+// Your web app's Firebase configuration
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
-  apiKey: "AIzaSyDMdZD60MIF4bKYUGCm7sgn1ZWiXzwjAP4",
-  authDomain: "escape-game-demo-ef5f7.firebaseapp.com",
-  projectId: "escape-game-demo-ef5f7",
-  storageBucket: "escape-game-demo-ef5f7.appspot.com",
-  messagingSenderId: "179786377236",
-  appId: "1:179786377236:web:0a96389e7c2c256e815f01",
-  measurementId: "G-FMD8X784VM"
+  apiKey: "AIzaSyC67w7K6BqcNkBh4yeNd4OfgvjAw_neO4k",
+  authDomain: "the-game-30e6d.firebaseapp.com",
+  databaseURL: "https://the-game-30e6d-default-rtdb.firebaseio.com",
+  projectId: "the-game-30e6d",
+  storageBucket: "the-game-30e6d.firebasestorage.app",
+  messagingSenderId: "222102581853",
+  appId: "1:222102581853:web:a211cfbed9dadc3cfe13b4",
+  measurementId: "G-L2G22DJQFZ"
 };
 
+// Initialize Firebase
 const app = initializeApp(firebaseConfig);
-const db = getDatabase(app);
+const analytics = getAnalytics(app);
 
 // Variables globales de jeu
 let partieId = null;
