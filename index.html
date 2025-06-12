@@ -16,7 +16,32 @@
     <button id="btnRejoindre">Rejoindre une partie</button>
     <div id="menuMessage"></div>
   </div>
-  <!-- ...le reste ne change pas... -->
+
+  <div id="lobby" style="display:none;">
+    <h2>Lobby de la partie</h2>
+    <div id="lobbyJoueurs"></div>
+    <button id="btnPret">Je suis prêt !</button>
+    <button id="btnDemarrer" style="display:none;">Démarrer la partie</button>
+    <button id="btnQuitterLobby">Quitter la salle</button>
+    <div id="lobbyMessage"></div>
+  </div>
+
+  <div id="jeu" style="display:none;">
+    <h1>The Game - Multi-joueurs</h1>
+    <label>
+      <input type="checkbox" id="themeToggle"> Mode sombre
+    </label>
+    <div id="info"></div>
+    <div class="zone" id="piles"></div>
+    <div class="zone-info">
+      <div id="main"></div>
+      <button id="btnFinTour" disabled>Fin du tour</button>
+    </div>
+    <div id="listeJoueurs"></div>
+    <div id="message"></div>
+  </div>
+
+  <!-- Firebase SDKs (compat needed for browser global 'firebase') -->
   <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
   <script src="script.js"></script>
