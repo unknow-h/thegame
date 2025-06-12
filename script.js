@@ -36,6 +36,8 @@ function afficherLobbyGlobal() {
   if (!zone || !liste) return;
   zone.style.display = "";
   liste.innerHTML = "<i>Chargement...</i>";
+  // Correction pour le warning Firebase, assurez-vous que cette règle est dans vos règles Firebase
+  // ".indexOn": "etat"
   db.ref('parties').orderByChild('etat').equalTo('attente').on('value', snap => {
     liste.innerHTML = "";
     let found = false;
@@ -350,6 +352,7 @@ async function creerPartie(pseudoJoueur, customId) {
     return;
   }
   partieId = customId;
+  pseudo = pseudoJoueur; // Définir le pseudo ici aussi pour consistance
   const partieData = {
     joueurs: {
       [pseudoJoueur]: { prêt: false, isCreator: true, mainIndex: 0 }
@@ -359,36 +362,95 @@ async function creerPartie(pseudoJoueur, customId) {
     lastActive: Date.now()
   };
   await partieRef.set(partieData);
-  pseudo = pseudoJoueur;
   ecouterPartie();
   verifierSuppressionAuto();
   montrerLobby();
   afficherLobbyMessage(`Partie créée. ID : ${partieId}`);
+  localStorage.setItem('lastPartieId', customId);
+  localStorage.setItem('lastPseudo', pseudoJoueur);
 }
 
 async function rejoindrePartie(idPartie, pseudoJoueur) {
+  console.log("DEBUG: --- Début rejoindrePartie ---");
+  console.log("DEBUG: Tentative de rejoindre la partie ID:", idPartie, "avec pseudo:", pseudoJoueur);
+
   partieId = idPartie;
   pseudo = pseudoJoueur;
   const joueursRef = db.ref(`parties/${partieId}/joueurs`);
+
   try {
-    await joueursRef.transaction(joueurs => {
-      if (joueurs) {
-        if (Object.keys(joueurs).length >= 4) throw "Partie pleine";
-        if (joueurs[pseudo]) throw "Pseudo déjà utilisé";
-        let usedIndexes = Object.values(joueurs).map(j => j.mainIndex);
-        let mainIndex = [0,1,2,3].find(i => !usedIndexes.includes(i));
-        joueurs[pseudo] = { prêt: false, isCreator: false, mainIndex };
-      } else {
-        joueurs = { [pseudo]: { prêt: false, isCreator: false, mainIndex: 0 } };
-      }
-      return joueurs;
+    console.log("DEBUG: Récupération de l'état actuel de la partie...");
+    const snapshot = await db.ref(`parties/${partieId}`).get();
+
+    if (!snapshot.exists()) {
+      console.error("DEBUG: La partie n'existe pas ou a été supprimée.");
+      throw "La partie n'existe pas.";
+    }
+    const partieState = snapshot.val();
+    console.log("DEBUG: État de la partie récupéré:", partieState.etat);
+
+    // Permettre la reconnexion à une partie "attente" ou "en_cours"
+    if (partieState.etat !== "attente" && partieState.etat !== "en_cours") {
+        console.error("DEBUG: La partie est dans un état non joignable:", partieState.etat);
+        throw `La partie est dans un état non joignable: ${partieState.etat}.`;
+    }
+
+    console.log("DEBUG: Début de la transaction pour ajouter/confirmer le joueur...");
+    await joueursRef.transaction(joueursData => {
+        if (joueursData) {
+            // Si le joueur existe déjà, on ne fait rien dans la transaction (il est "reconnecté")
+            if (joueursData[pseudoJoueur]) {
+                console.log(`DEBUG: Pseudo '${pseudoJoueur}' déjà présent dans la partie. Confirmation.`);
+                // Pas besoin de throw, juste retourner les données actuelles
+                return joueursData;
+            }
+            console.log("DEBUG: Joueurs existants:", Object.keys(joueursData).length);
+            if (Object.keys(joueursData).length >= 4) {
+                console.error("DEBUG: Partie pleine.");
+                throw "Partie pleine";
+            }
+            let usedIndexes = Object.values(joueursData).map(j => j.mainIndex);
+            let mainIndex = [0,1,2,3].find(i => !usedIndexes.includes(i));
+            console.log("DEBUG: Assignation du mainIndex:", mainIndex);
+            joueursData[pseudoJoueur] = { prêt: false, isCreator: false, mainIndex };
+        } else {
+            console.log("DEBUG: Initialisation du premier joueur de la partie.");
+            // Ce cas est rare pour un "rejoindre" si la partie existe déjà et a un état.
+            joueursData = { [pseudoJoueur]: { prêt: false, isCreator: false, mainIndex: 0 } };
+        }
+        return joueursData;
     });
+
+    console.log("DEBUG: Transaction terminée avec succès. Appel de ecouterPartie()...");
     ecouterPartie();
+    console.log("DEBUG: Appel de verifierSuppressionAuto()...");
     verifierSuppressionAuto();
-    montrerLobby();
-    afficherLobbyMessage(`Rejoint la partie ${partieId}`);
+
+    // Gérer l'affichage immédiat en fonction de l'état de la partie
+    if (partieState.etat === "attente") {
+        console.log("DEBUG: Partie en attente, montrer lobby.");
+        montrerLobby();
+        afficherLobbyMessage(`Rejoint la partie ${partieId}`);
+    } else if (partieState.etat === "en_cours") {
+        console.log("DEBUG: Partie en cours, cacher lobby et mettre à jour le jeu.");
+        cacherLobby(); // Masque le lobby et affiche le jeu
+        // updateInterfaceAvecEtat() sera appelé par ecouterPartie() après la mise à jour des données.
+        // On peut l'appeler explicitement ici si on veut une mise à jour synchrone très rapide
+        // mais souvent la 'value' listener de ecouterPartie suffit.
+    }
+
+    localStorage.setItem('lastPartieId', idPartie);
+    localStorage.setItem('lastPseudo', pseudoJoueur);
+    console.log("DEBUG: Fin de rejoindrePartie (succès).");
+
   } catch (e) {
-    document.getElementById("menuMessage").innerText = e;
+    console.error("DEBUG: Erreur capturée dans rejoindrePartie:", e); // <-- Très important!
+    document.getElementById("menuMessage").innerText = String(e); // S'assurer que c'est une string
+    localStorage.removeItem('lastPartieId');
+    localStorage.removeItem('lastPseudo');
+    afficherMenuAccueil();
+    afficherLobbyGlobal();
+    console.log("DEBUG: Fin de rejoindrePartie (échec).");
   }
 }
 
@@ -409,13 +471,28 @@ function updateLobbyAffichage() {
 }
 function pretLobby() {
   updateLastActive();
-  db.ref(`parties/${partieId}/joueurs/${pseudo}/prêt`).set(true);
+  db.ref(`parties/${partieId}/joueurs/${pseudo}/prêt`).set(true)
+    .then(() => {
+      // updateLobbyAffichage() sera appelé par le listener de ecouterPartie()
+      // une fois que la DB est mise à jour.
+      console.log("DEBUG: Statut 'prêt' mis à jour dans Firebase.");
+    })
+    .catch(error => {
+      console.error("Erreur setting prêt status:", error);
+      showNotification("Erreur: Impossible de se marquer comme prêt.");
+    });
 }
 async function demarrerPartie() {
   updateLastActive();
   let deck = Array.from({ length: 98 }, (_, i) => i + 2).sort(() => Math.random() - 0.5);
   const joueursList = Object.entries(etatPartie.joueurs);
-  const mainsInit = joueursList.map(([,j]) => deck.splice(0, 8));
+  // Assurez-vous que les index des mains correspondent à ceux stockés pour chaque joueur
+  // On doit distribuer les cartes en respectant l'ordre des mainIndex
+  const mainsInit = Array.from({length: 4}).fill([]); // Initialise 4 mains vides
+  joueursList.forEach(([,j]) => {
+      mainsInit[j.mainIndex] = deck.splice(0, 8);
+  });
+
   await db.ref(`parties/${partieId}`).update({
     etat: "en_cours",
     mains: mainsInit,
@@ -427,16 +504,24 @@ async function demarrerPartie() {
       { id: 4, type: 'descendante', value: 100 }
     ],
     joueurActuel: 0,
-    cartesAJouer: Math.min(3, mainsInit[0]?.length || 0),
+    cartesAJouer: Math.min(3, mainsInit[0]?.length || 0), // Assurez-vous que mainInit[0] existe
     historique: [],
     lastActive: Date.now()
   });
 }
-function quitterLobby() { window.location.reload(); }
+function quitterLobby() {
+  localStorage.removeItem('lastPartieId');
+  localStorage.removeItem('lastPseudo');
+  window.location.reload();
+}
 
 // Bloc de suppression automatique (notification visuelle si expiration)
 function verifierSuppressionAuto() {
-  setInterval(async () => {
+  // Clear any existing interval to prevent duplicates if called multiple times
+  if (window.partieTimeoutInterval) {
+    clearInterval(window.partieTimeoutInterval);
+  }
+  window.partieTimeoutInterval = setInterval(async () => {
     if (!partieId) return;
     const partieRef = db.ref(`parties/${partieId}`);
     const snap = await partieRef.child('lastActive').get();
@@ -444,6 +529,8 @@ function verifierSuppressionAuto() {
     if (last && (Date.now() - last > PARTIE_TIMEOUT)) {
       await partieRef.remove();
       showNotification("La partie a expiré après 30 minutes d'inactivité.");
+      localStorage.removeItem('lastPartieId');
+      localStorage.removeItem('lastPseudo');
       window.location.reload();
     }
   }, 60 * 1000);
@@ -451,42 +538,73 @@ function verifierSuppressionAuto() {
 
 // Bloc d'écoute de la partie (notification visuelle si suppression)
 function ecouterPartie() {
+  // Detach any previous listener to prevent multiple listeners on the same path
+  if (window.firebasePartieListener) {
+    db.ref(`parties/${partieId}`).off('value', window.firebasePartieListener);
+  }
+
   const partieRef = db.ref(`parties/${partieId}`);
-  partieRef.on('value', snapshot => {
+  // Store the listener function for later detachment
+  window.firebasePartieListener = snapshot => {
     const data = snapshot.val();
+    console.log("DEBUG: ecouterPartie - Données Firebase reçues:", data);
+
     if (!data) {
       showNotification("La partie a été supprimée ou expirée.");
-      afficherMenuAccueil();
-      afficherLobbyGlobal();
+      localStorage.removeItem('lastPartieId');
+      localStorage.removeItem('lastPseudo');
+      // Assurez-vous de rediriger proprement si la partie n'existe plus
+      if (document.getElementById("jeu").style.display !== "none" || document.getElementById("lobby").style.display !== "none") {
+        afficherMenuAccueil(); // Retour au menu principal
+      }
       return;
     }
     etatPartie = data;
     joueurs = data.joueurs || {};
     historiqueCartesJouees = data.historique || [];
+
+    // Si le joueur actuel n'est plus dans la liste des joueurs de la partie
+    if (pseudo && !joueurs[pseudo]) {
+        showNotification("Vous avez été déconnecté de la partie.");
+        localStorage.removeItem('lastPartieId');
+        localStorage.removeItem('lastPseudo');
+        afficherMenuAccueil();
+        afficherLobbyGlobal();
+        return;
+    }
+
     if (etatPartie.etat === "attente") {
+      console.log("DEBUG: ecouterPartie - État: attente");
       montrerLobby();
       updateLobbyAffichage();
     } else if (etatPartie.etat === "en_cours") {
+      console.log("DEBUG: ecouterPartie - État: en_cours");
       cacherLobby();
       updateInterfaceAvecEtat();
     } else if (etatPartie.etat === "terminee") {
+      console.log("DEBUG: ecouterPartie - État: terminee");
       cacherLobby();
       afficherMessage("Partie terminée !");
       enableInteraction(false);
+      localStorage.removeItem('lastPartieId');
+      localStorage.removeItem('lastPseudo');
     }
-  });
+  };
+  partieRef.on('value', window.firebasePartieListener);
 }
 
 function afficherListeJoueurs(joueurs, mains, joueurActuel) {
   const div = document.getElementById("listeJoueurs");
   div.innerHTML = "<h3>Joueurs connectés :</h3><ul>";
-  Object.entries(joueurs).forEach(([nom, infos]) => {
+  const joueursTries = Object.entries(joueurs).sort((a,b) => a[1].mainIndex - b[1].mainIndex);
+
+  joueursTries.forEach(([nom, infos]) => {
     let mainIndex = infos.mainIndex;
     let nbcartes = mains && mains[mainIndex] ? mains[mainIndex].length : "?";
     div.innerHTML += `<li>
-      ${nom} 
-      ${infos.isCreator ? "(créateur)" : ""} 
-      ${joueurActuel === mainIndex ? "<b> (joue)</b>" : ""}
+      ${nom}
+      ${infos.isCreator ? "(créateur)" : ""}
+      ${etatPartie.joueurActuel === mainIndex ? "<b> (joue)</b>" : ""}
       &mdash; <span style="color:#888;">${nbcartes} carte${nbcartes>1?'s':''}</span>
     </li>`;
   });
@@ -507,9 +625,20 @@ function getNomJoueurParIndex(idx) {
 function updateInterfaceAvecEtat() {
   if (!etatPartie) return;
   const mainIndex = joueurs[pseudo]?.mainIndex;
+
+  if (mainIndex === undefined || mainIndex === null) {
+      console.error("DEBUG: updateInterfaceAvecEtat - mainIndex est undefined ou null pour le pseudo actuel.");
+      showNotification("Vous n'êtes plus dans cette partie.");
+      localStorage.removeItem('lastPartieId');
+      localStorage.removeItem('lastPseudo');
+      afficherMenuAccueil();
+      afficherLobbyGlobal();
+      return;
+  }
+
   afficherListeJoueurs(joueurs, etatPartie.mains, etatPartie.joueurActuel);
   updateAffichagePartie(
-    etatPartie.mains[mainIndex],    // toujours la main du joueur connecté !
+    etatPartie.mains[mainIndex],
     etatPartie.piles,
     etatPartie.joueurActuel,
     etatPartie.cartesAJouer
@@ -565,7 +694,7 @@ function updateAffichagePartie(main, pilesData, joueurActuelIndex, cartesAJouerR
 
   // Vérifie l'absence de coup possible pour le joueur courant
   if (
-    etatPartie.joueurActuel === joueurs[pseudo].mainIndex &&
+    etatPartie.joueurActuel === joueurs[pseudo]?.mainIndex &&
     main.length > 0 &&
     aucunCoupPossible(main, pilesData)
   ) {
@@ -575,18 +704,19 @@ function updateAffichagePartie(main, pilesData, joueurActuelIndex, cartesAJouerR
 
 function enableInteraction(active) {
   const mainDiv = document.getElementById("main");
+  const finTourBtn = document.getElementById("btnFinTour");
   if (active) {
     mainDiv.style.pointerEvents = "auto";
-    document.getElementById("btnFinTour").disabled = false;
+    finTourBtn.disabled = false;
   } else {
     mainDiv.style.pointerEvents = "none";
     carteSelectionnee = null;
-    document.getElementById("btnFinTour").disabled = true;
+    finTourBtn.disabled = true;
   }
 }
 
 function selectionnerCarte(c) {
-  if (etatPartie.joueurActuel !== joueurs[pseudo].mainIndex) return;
+  if (etatPartie.joueurActuel !== joueurs[pseudo]?.mainIndex) return;
   carteSelectionnee = carteSelectionnee === c ? null : c;
   updateAffichagePartie(
     etatPartie.mains[joueurs[pseudo].mainIndex],
@@ -598,7 +728,7 @@ function selectionnerCarte(c) {
 
 async function poserCarteFirebase(pile) {
   if (carteSelectionnee === null) return;
-  if (etatPartie.joueurActuel !== joueurs[pseudo].mainIndex) return;
+  if (etatPartie.joueurActuel !== joueurs[pseudo]?.mainIndex) return;
   updateLastActive();
   const mainIndex = joueurs[pseudo].mainIndex;
   const main = [...etatPartie.mains[mainIndex]];
@@ -616,7 +746,6 @@ async function poserCarteFirebase(pile) {
   nouvellesMains[mainIndex] = nouvelleMain;
   let nouveauxCartesAJouer = etatPartie.cartesAJouer - 1;
 
-  // Historique (synchrone pour tous)
   let hist = etatPartie.historique || [];
   hist.push(`Joueur ${mainIndex + 1} ➜ ${carte} sur pile ${pile.id} (${pile.type})`);
 
@@ -648,10 +777,26 @@ async function finTour() {
 
   let joueurCount = Object.keys(joueurs).length;
   let nouveauJoueur = (etatPartie.joueurActuel + 1) % joueurCount;
-  const joueursKeys = Object.values(joueurs).map(j => j.mainIndex);
-  while (!joueursKeys.includes(nouveauJoueur)) {
-    nouveauJoueur = (nouveauJoueur + 1) % joueurCount;
+
+  const joueursActifsIndexes = Object.values(joueurs).map(j => j.mainIndex).sort((a,b)=>a-b);
+  let originalNouveauJoueurIndex = nouveauJoueur;
+  let foundNext = false;
+  // Cherche le prochain joueur dans l'ordre des mainIndex
+  for (let i = 0; i < joueurCount; i++) {
+      if (joueursActifsIndexes.includes(nouveauJoueur)) {
+          foundNext = true;
+          break;
+      }
+      nouveauJoueur = (nouveauJoueur + 1) % joueurCount;
   }
+  // Fallback si personne n'est trouvé (ne devrait pas arriver si des joueurs sont présents)
+  if (!foundNext && joueursActifsIndexes.length > 0) {
+      nouveauJoueur = joueursActifsIndexes[0];
+  } else if (joueursActifsIndexes.length === 0) {
+      // Aucun joueur actif, potentiellement la partie est vide
+      return; // Ne pas continuer le tour
+  }
+
   await db.ref(`parties/${partieId}`).update({
     mains: mains,
     deck: deck,
@@ -695,32 +840,63 @@ function afficherGameOverMulti() {
   };
   document.getElementById("btnQuitMulti").onclick = () => {
     modal.remove();
+    localStorage.removeItem('lastPartieId');
+    localStorage.removeItem('lastPseudo');
     afficherMenuAccueil();
   };
 }
 // =============== RECONNEXION AUTOMATIQUE ===============
 function checkReconnect() {
+  console.log("DEBUG: checkReconnect() appelée.");
   const lastId = localStorage.getItem('lastPartieId');
-  if (lastId) {
+  const lastPseudo = localStorage.getItem('lastPseudo');
+
+  if (lastId && lastPseudo) {
+    console.log(`DEBUG: Données de reconnexion trouvées - ID: ${lastId}, Pseudo: ${lastPseudo}`);
     db.ref('parties/' + lastId).once('value').then(snap => {
       if (snap.exists()) {
-        showNotification("Vous avez quitté une partie. Reconnexion automatique possible !");
-        // On propose à l'utilisateur de rejoindre (si il veut)
-        const reconnexion = confirm("Souhaitez-vous rejoindre la dernière partie (" + lastId + ") ?");
-        if (reconnexion) {
-          document.getElementById("idPartie").value = lastId;
+        const partieData = snap.val();
+        console.log("DEBUG: checkReconnect - Partie existe. État:", partieData.etat);
+        if (partieData.etat === "attente" || partieData.etat === "en_cours") {
+          showNotification("Vous avez quitté une partie. Reconnexion automatique possible !");
+          const reconnexion = confirm("Souhaitez-vous rejoindre la dernière partie (" + lastId + ") avec le pseudo " + lastPseudo + " ?");
+          if (reconnexion) {
+            console.log("DEBUG: Utilisateur a accepté la reconnexion.");
+            document.getElementById("idPartie").value = lastId;
+            document.getElementById("pseudo").value = lastPseudo;
+            rejoindrePartie(lastId, lastPseudo); // Tenter la reconnexion directement
+          } else {
+            console.log("DEBUG: Utilisateur a refusé la reconnexion. Nettoyage localStorage.");
+            localStorage.removeItem('lastPartieId');
+            localStorage.removeItem('lastPseudo');
+            afficherMenuAccueil();
+            afficherLobbyGlobal();
+          }
         } else {
+          console.log("DEBUG: checkReconnect - Partie dans un état non rejoignable (terminée). Nettoyage localStorage.");
           localStorage.removeItem('lastPartieId');
+          localStorage.removeItem('lastPseudo');
+          showNotification("L'ancienne partie est terminée ou inaccessible.");
           afficherMenuAccueil();
           afficherLobbyGlobal();
         }
       } else {
+        console.log("DEBUG: checkReconnect - L'ancienne partie n'existe plus dans Firebase. Nettoyage localStorage.");
         localStorage.removeItem('lastPartieId');
+        localStorage.removeItem('lastPseudo');
+        showNotification("L'ancienne partie n'existe plus ou a expiré.");
         afficherMenuAccueil();
         afficherLobbyGlobal();
       }
+    }).catch(error => {
+        console.error("DEBUG: Erreur lors de la vérification de reconnexion:", error);
+        localStorage.removeItem('lastPartieId');
+        localStorage.removeItem('lastPseudo');
+        afficherMenuAccueil();
+        afficherLobbyGlobal();
     });
   } else {
+    console.log("DEBUG: Aucune donnée de reconnexion trouvée. Affichage du menu principal.");
     afficherMenuAccueil();
     afficherLobbyGlobal();
   }
@@ -728,7 +904,8 @@ function checkReconnect() {
 
 // =============== INITIALISATION AU CHARGEMENT ===============
 window.onload = () => {
-  checkReconnect();
+  console.log("DEBUG: window.onload - Initialisation de l'application.");
+  checkReconnect(); // Lance la vérification de reconnexion au démarrage
 
   document.getElementById("btnCreer").onclick = () => {
     const pseudoInput = document.getElementById("pseudo");
@@ -736,7 +913,6 @@ window.onload = () => {
     if (!pseudoInput.value.trim() || !customIdInput.value.trim()) return alert("Entrez un pseudo et un ID de partie");
     modeSolo = false;
     creerPartie(pseudoInput.value.trim(), customIdInput.value.trim());
-    localStorage.setItem('lastPartieId', customIdInput.value.trim());
   };
   document.getElementById("btnRejoindre").onclick = () => {
     const pseudoInput = document.getElementById("pseudo");
@@ -744,12 +920,10 @@ window.onload = () => {
     if (!pseudoInput.value.trim() || !idPartieInput.value.trim()) return alert("Entrez pseudo et ID partie");
     modeSolo = false;
     rejoindrePartie(idPartieInput.value.trim(), pseudoInput.value.trim());
-    localStorage.setItem('lastPartieId', idPartieInput.value.trim());
   };
   document.getElementById("btnSolo").onclick = ouvrirSoloModal;
   document.getElementById("btnLancerSolo").onclick = lancerPartieSolo;
 
-  // === AJOUTE ICI LES LIGNES POUR LE MULTIJOUEUR ===
   document.getElementById("btnPret").onclick = pretLobby;
   document.getElementById("btnDemarrer").onclick = demarrerPartie;
   document.getElementById("btnQuitterLobby").onclick = quitterLobby;
@@ -768,17 +942,14 @@ window.onload = () => {
     if (!hist || hist.length === 0) {
       contenu.innerText = "Aucune action pour le moment.";
     } else {
-      contenu.innerText = hist.join("\n");
+      // Pour une meilleure lisibilité, inverse l'ordre pour voir les dernières actions en premier
+      contenu.innerText = hist.slice().reverse().join("\n");
     }
     modal.style.display = "flex";
   };
-  // Affichage lobby global au démarrage
-  if(document.getElementById("btnCreerLobby")) {
-    document.getElementById("btnCreerLobby").onclick = () => {
-      document.getElementById("zoneLobbyAll").style.display = "none";
-      document.getElementById("menuAccueil").style.display = "";
-      document.getElementById("customIdPartie").focus();
-    };
-  }
-  afficherLobbyGlobal();
+  document.getElementById("btnCreerLobby").onclick = () => {
+    document.getElementById("zoneLobbyAll").style.display = "none";
+    document.getElementById("menuAccueil").style.display = "";
+    document.getElementById("customIdPartie").focus();
+  };
 };
