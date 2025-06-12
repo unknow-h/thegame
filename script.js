@@ -18,6 +18,48 @@ let historiqueCartesJouees = [];
 
 const PARTIE_TIMEOUT = 30 * 60 * 1000; // 30 min en ms
 
+// === NOTIFICATIONS VISUELLES (NOUVEAU) ===
+function showNotification(msg) {
+  const area = document.getElementById('notificationArea');
+  if (!area) return;
+  const notif = document.createElement('div');
+  notif.className = 'notification';
+  notif.textContent = msg;
+  area.appendChild(notif);
+  setTimeout(() => notif.remove(), 4500);
+}
+
+// === LOBBY GLOBAL (NOUVEAU) ===
+function afficherLobbyGlobal() {
+  const zone = document.getElementById("zoneLobbyAll");
+  const liste = document.getElementById("listeLobbyParties");
+  if (!zone || !liste) return;
+  zone.style.display = "";
+  liste.innerHTML = "<i>Chargement...</i>";
+  db.ref('parties').orderByChild('etat').equalTo('attente').on('value', snap => {
+    liste.innerHTML = "";
+    let found = false;
+    snap.forEach(child => {
+      const id = child.key;
+      const data = child.val();
+      found = true;
+      const btn = document.createElement("button");
+      btn.className = 'lobby-entry';
+      btn.innerHTML = `
+        <span><b>${id}</b> (${Object.keys(data.joueurs||{}).length} joueur${Object.keys(data.joueurs||{}).length>1?'s':''})</span>
+        <span style="font-size:0.9em;color:#555;">Rejoindre</span>
+      `;
+      btn.onclick = () => {
+        document.getElementById("zoneLobbyAll").style.display="none";
+        document.getElementById("menuAccueil").style.display="";
+        document.getElementById("idPartie").value = id;
+      };
+      liste.appendChild(btn);
+    });
+    if (!found) liste.innerHTML = "<i>Aucune partie ouverte</i>";
+  });
+}
+
 // --- MODE SOLO LOCAL ---
 let solo = {
   deck: [],
@@ -33,6 +75,9 @@ function afficherMenuAccueil() {
   document.getElementById("menuAccueil").style.display = "block";
   document.getElementById("lobby").style.display = "none";
   document.getElementById("jeu").style.display = "none";
+  const zoneLobby = document.getElementById("zoneLobbyAll");
+  if(zoneLobby) zoneLobby.style.display = "";
+  afficherLobbyGlobal();
 }
 function montrerLobby() {
   document.getElementById("menuAccueil").style.display = "none";
@@ -285,7 +330,6 @@ function afficherGameOverSolo() {
     afficherMenuAccueil();
   };
 }
-
 // =============== MULTIJOUEUR ===============
 
 function updateLastActive() {
@@ -390,7 +434,7 @@ async function demarrerPartie() {
 }
 function quitterLobby() { window.location.reload(); }
 
-// Bloc de suppression automatique
+// Bloc de suppression automatique (notification visuelle si expiration)
 function verifierSuppressionAuto() {
   setInterval(async () => {
     if (!partieId) return;
@@ -399,16 +443,23 @@ function verifierSuppressionAuto() {
     const last = snap.val();
     if (last && (Date.now() - last > PARTIE_TIMEOUT)) {
       await partieRef.remove();
-      alert("La partie a expiré après 30 minutes d'inactivité.");
+      showNotification("La partie a expiré après 30 minutes d'inactivité.");
       window.location.reload();
     }
   }, 60 * 1000);
 }
+
+// Bloc d'écoute de la partie (notification visuelle si suppression)
 function ecouterPartie() {
   const partieRef = db.ref(`parties/${partieId}`);
   partieRef.on('value', snapshot => {
     const data = snapshot.val();
-    if (!data) return alert("Partie supprimée ou inexistante.");
+    if (!data) {
+      showNotification("La partie a été supprimée ou expirée.");
+      afficherMenuAccueil();
+      afficherLobbyGlobal();
+      return;
+    }
     etatPartie = data;
     joueurs = data.joueurs || {};
     historiqueCartesJouees = data.historique || [];
@@ -647,16 +698,45 @@ function afficherGameOverMulti() {
     afficherMenuAccueil();
   };
 }
+// =============== RECONNEXION AUTOMATIQUE ===============
+function checkReconnect() {
+  const lastId = localStorage.getItem('lastPartieId');
+  if (lastId) {
+    db.ref('parties/' + lastId).once('value').then(snap => {
+      if (snap.exists()) {
+        showNotification("Vous avez quitté une partie. Reconnexion automatique possible !");
+        // On propose à l'utilisateur de rejoindre (si il veut)
+        const reconnexion = confirm("Souhaitez-vous rejoindre la dernière partie (" + lastId + ") ?");
+        if (reconnexion) {
+          document.getElementById("idPartie").value = lastId;
+        } else {
+          localStorage.removeItem('lastPartieId');
+          afficherMenuAccueil();
+          afficherLobbyGlobal();
+        }
+      } else {
+        localStorage.removeItem('lastPartieId');
+        afficherMenuAccueil();
+        afficherLobbyGlobal();
+      }
+    });
+  } else {
+    afficherMenuAccueil();
+    afficherLobbyGlobal();
+  }
+}
 
-// =============== OPTIONS COMMUNES ================
+// =============== INITIALISATION AU CHARGEMENT ===============
 window.onload = () => {
-  afficherMenuAccueil();
+  checkReconnect();
+
   document.getElementById("btnCreer").onclick = () => {
     const pseudoInput = document.getElementById("pseudo");
     const customIdInput = document.getElementById("customIdPartie");
     if (!pseudoInput.value.trim() || !customIdInput.value.trim()) return alert("Entrez un pseudo et un ID de partie");
     modeSolo = false;
     creerPartie(pseudoInput.value.trim(), customIdInput.value.trim());
+    localStorage.setItem('lastPartieId', customIdInput.value.trim());
   };
   document.getElementById("btnRejoindre").onclick = () => {
     const pseudoInput = document.getElementById("pseudo");
@@ -664,6 +744,7 @@ window.onload = () => {
     if (!pseudoInput.value.trim() || !idPartieInput.value.trim()) return alert("Entrez pseudo et ID partie");
     modeSolo = false;
     rejoindrePartie(idPartieInput.value.trim(), pseudoInput.value.trim());
+    localStorage.setItem('lastPartieId', idPartieInput.value.trim());
   };
   document.getElementById("btnSolo").onclick = ouvrirSoloModal;
   document.getElementById("btnLancerSolo").onclick = lancerPartieSolo;
@@ -686,4 +767,13 @@ window.onload = () => {
     }
     modal.style.display = "flex";
   };
+  // Affichage lobby global au démarrage
+  if(document.getElementById("btnCreerLobby")) {
+    document.getElementById("btnCreerLobby").onclick = () => {
+      document.getElementById("zoneLobbyAll").style.display = "none";
+      document.getElementById("menuAccueil").style.display = "";
+      document.getElementById("customIdPartie").focus();
+    };
+  }
+  afficherLobbyGlobal();
 };
