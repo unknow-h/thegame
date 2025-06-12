@@ -1,62 +1,37 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8">
   <title>The Game - Multi-joueurs Firebase</title>
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css">
   <style>
-    /* Lobby quick styles for visibility */
-    #lobby {
-      position: fixed;
-      background: #fff;
-      border: 2px solid #333;
-      border-radius: 8px;
-      padding: 30px 40px;
-      top: 50%; left: 50%;
-      transform: translate(-50%,-50%);
-      z-index: 2000;
-      min-width: 320px;
-      min-height: 200px;
-      box-shadow: 0 0 15px #0005;
-      display: none;
-    }
-    #lobby h2 { text-align:center; }
-    #lobby ul { list-style:none; padding:0; }
-    #lobbyMessage {color:#333; margin-top:10px;}
+    /* ... Put your styles from your code here or link styles.css ... */
   </style>
 </head>
 <body>
   <div id="menuAccueil">
     <h2>Bienvenue dans The Game</h2>
-    <input type="text" id="pseudo" placeholder="Ton pseudo" />
-    <input type="text" id="idPartie" placeholder="ID de la partie (pour rejoindre)" />
-    <label><input type="checkbox" id="useBots" /> Utiliser des bots</label>
+    <input type="text" id="pseudo" placeholder="Ton pseudo">
+    <input type="text" id="idPartie" placeholder="ID de la partie (pour rejoindre)">
     <button id="btnCreer">Créer une partie</button>
     <button id="btnRejoindre">Rejoindre une partie</button>
+    <div id="menuMessage"></div>
   </div>
 
-  <!-- Lobby d’attente -->
-  <div id="lobby">
+  <div id="lobby" style="display:none;">
     <h2>Lobby de la partie</h2>
     <div id="lobbyJoueurs"></div>
-    <div id="lobbyOptions"></div>
     <button id="btnPret">Je suis prêt !</button>
     <button id="btnDemarrer" style="display:none;">Démarrer la partie</button>
     <button id="btnQuitterLobby">Quitter la salle</button>
     <div id="lobbyMessage"></div>
   </div>
 
-  <header id="headerJeu" style="display:none;">
-    <h1>The Game - Version avec Bots</h1>
+  <div id="jeu" style="display:none;">
+    <h1>The Game - Multi-joueurs</h1>
     <label>
-      <input type="checkbox" id="themeToggle" /> Mode sombre
+      <input type="checkbox" id="themeToggle"> Mode sombre
     </label>
-    <button id="btnAide">❓ Aide</button>
-    <button id="btnHistorique">📜 Historique</button>
-  </header>
-
-  <main id="jeu" style="display:none;">
-    <div id="pioche"></div>
     <div id="info"></div>
     <div class="zone" id="piles"></div>
     <div class="zone-info">
@@ -65,13 +40,11 @@
     </div>
     <div id="listeJoueurs"></div>
     <div id="message"></div>
-  </main>
+  </div>
 
   <!-- Firebase SDKs -->
   <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
-
-  <!-- Script du jeu -->
   <script src="script.js"></script>
 </body>
 </html>
