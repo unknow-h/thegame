@@ -84,26 +84,6 @@ body.dark button {
   background: #333;
   color: #fff;
 }
-#setupModal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  background: rgba(0, 0, 0, 0.8);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-#setupBox {
-  background: white;
-  padding: 30px;
-  border-radius: 10px;
-  text-align: center;
-  user-select: none;
-}
-/* Lobby styles (also in index.html for quick test) */
 #lobby {
   position: fixed;
   background: #fff;
