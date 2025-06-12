@@ -1,11 +1,4 @@
-// Import the functions you need from the SDKs you need
-import { initializeApp } from "firebase/app";
-import { getAnalytics } from "firebase/analytics";
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
-
-// Your web app's Firebase configuration
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+// Import compat Firebase modules since on CDN with compat syntax
 const firebaseConfig = {
   apiKey: "AIzaSyC67w7K6BqcNkBh4yeNd4OfgvjAw_neO4k",
   authDomain: "the-game-30e6d.firebaseapp.com",
@@ -18,8 +11,8 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
 
 // Variables globales de jeu
 let partieId = null;
@@ -35,8 +28,8 @@ let cartesAJouer = 3;
 
 // Créer une partie
 async function creerPartie(pseudoJoueur) {
-  const partiesRef = ref(db, 'parties');
-  const nouvellePartieRef = push(partiesRef);
+  const partiesRef = db.ref('parties');
+  const nouvellePartieRef = partiesRef.push();
   partieId = nouvellePartieRef.key;
 
   const deckInit = Array.from({ length: 98 }, (_, i) => i + 2).sort(() => Math.random() - 0.5);
@@ -68,7 +61,7 @@ async function creerPartie(pseudoJoueur) {
     etat: "attente" // ou "en_cours", "terminee"
   };
 
-  await set(nouvellePartieRef, partieData);
+  await nouvellePartieRef.set(partieData);
   pseudo = pseudoJoueur;
 
   ecouterPartie();
@@ -80,10 +73,10 @@ async function rejoindrePartie(idPartie, pseudoJoueur) {
   partieId = idPartie;
   pseudo = pseudoJoueur;
 
-  const joueursRef = ref(db, `parties/${partieId}/joueurs`);
+  const joueursRef = db.ref(`parties/${partieId}/joueurs`);
 
   try {
-    await runTransaction(joueursRef, joueurs => {
+    await joueursRef.transaction(joueurs => {
       if (joueurs) {
         if (Object.keys(joueurs).length >= 4) {
           throw "Partie pleine";
@@ -109,8 +102,8 @@ async function rejoindrePartie(idPartie, pseudoJoueur) {
 
 // Écouter la partie pour synchro en temps réel
 function ecouterPartie() {
-  const partieRef = ref(db, `parties/${partieId}`);
-  onValue(partieRef, snapshot => {
+  const partieRef = db.ref(`parties/${partieId}`);
+  partieRef.on('value', snapshot => {
     const data = snapshot.val();
     if (!data) {
       alert("Partie supprimée ou inexistante.");
@@ -210,16 +203,19 @@ function updateAffichagePartie(main, pilesData, joueurActuelIndex, cartesAJouerR
 
   document.getElementById("info").innerText = `Joueur ${joueurActuelIndex + 1} - Cartes à jouer: ${cartesAJouerRestantes}`;
 
-  document.querySelector("button[onclick='finTour()']").disabled = cartesAJouerRestantes > 0;
+  const btnFinTour = document.getElementById("btnFinTour");
+  btnFinTour.disabled = cartesAJouerRestantes > 0;
 }
 
 function enableInteraction(active) {
   const mainDiv = document.getElementById("main");
   if (active) {
     mainDiv.style.pointerEvents = "auto";
+    document.getElementById("btnFinTour").disabled = false;
   } else {
     mainDiv.style.pointerEvents = "none";
     carteSelectionnee = null;
+    document.getElementById("btnFinTour").disabled = true;
   }
 }
 
@@ -270,7 +266,7 @@ async function poserCarteFirebase(pile) {
   let nouveauxCartesAJouer = etatPartie.cartesAJouer - 1;
 
   // Met à jour la DB
-  await update(ref(db, `parties/${partieId}`), {
+  await db.ref(`parties/${partieId}`).update({
     piles: nouvellesPiles,
     mains: nouvellesMains,
     deck: nouveauDeck,
@@ -278,12 +274,9 @@ async function poserCarteFirebase(pile) {
   });
 
   carteSelectionnee = null;
-
-  // Si plus de cartes dans main et deck vide -> victoire possible à gérer (à toi d'ajouter)
-
-  // Pas besoin d'updateInterface ici : la DB va pousser les mises à jour
 }
 
+// Fin de tour
 async function finTour() {
   if (etatPartie.cartesAJouer > 0) {
     alert(`Vous devez jouer encore ${etatPartie.cartesAJouer} carte(s)`);
@@ -297,7 +290,7 @@ async function finTour() {
     nouveauJoueur = (nouveauJoueur + 1) % 4;
   }
 
-  await update(ref(db, `parties/${partieId}`), {
+  await db.ref(`parties/${partieId}`).update({
     joueurActuel: nouveauJoueur,
     cartesAJouer: Math.min(3, etatPartie.mains[nouveauJoueur]?.length || 0)
   });
@@ -324,15 +317,32 @@ function handleRejoindrePartie() {
 
 function cacherMenuAccueil() {
   document.getElementById("menuAccueil").style.display = "none";
+  document.getElementById("headerJeu").style.display = "flex";
   document.getElementById("jeu").style.display = "block";
 }
 
 function afficherMenuAccueil() {
-  document.getElementById("menuAccueil").style.display = "block";
+  document.getElementById("menuAccueil").style.display = "flex";
+  document.getElementById("headerJeu").style.display = "none";
   document.getElementById("jeu").style.display = "none";
 }
 
-// AU DEMARRAGE
+// Liaisons d'événements
 window.onload = () => {
   afficherMenuAccueil();
+
+  document.getElementById("btnCreer").onclick = handleCreerPartie;
+  document.getElementById("btnRejoindre").onclick = handleRejoindrePartie;
+  document.getElementById("btnFinTour").onclick = finTour;
+
+  // Optionnel : toggle thème sombre
+  document.getElementById("themeToggle").onchange = e => {
+    if (e.target.checked) {
+      document.body.style.backgroundColor = "#222";
+      document.body.style.color = "#eee";
+    } else {
+      document.body.style.backgroundColor = "";
+      document.body.style.color = "";
+    }
+  };
 };
