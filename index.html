@@ -51,6 +51,11 @@
       cursor: pointer;
       transition: transform 0.2s ease;
       border-radius: 5px;
+      animation: pop-in 0.3s cubic-bezier(.5,-0.5,.5,1.5);
+    }
+    @keyframes pop-in {
+      0% { transform: scale(0.8); opacity: 0; }
+      100% { transform: scale(1); opacity: 1; }
     }
     .selected {
       border: 2px solid blue;
@@ -89,6 +94,34 @@
       z-index: 2000;
       border-radius: 5px;
     }
+    /* ------ Notifications visuelles ------ */
+    #notificationArea {
+      position: fixed;
+      top: 30px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 5000;
+      min-width: 200px;
+      pointer-events: none;
+    }
+    .notification {
+      display: inline-block;
+      background: #3084c4;
+      color: #fff;
+      padding: 16px 32px;
+      border-radius: 8px;
+      box-shadow: 0 4px 16px #0003;
+      font-size: 1.1em;
+      opacity: 0;
+      animation: fadeInOut 4.5s linear;
+      margin-bottom: 8px;
+    }
+    @keyframes fadeInOut {
+      0% { opacity: 0; }
+      10% { opacity: 1; }
+      90% { opacity: 1; }
+      100% { opacity: 0; }
+    }
     /* ------ Responsive design ------ */
     @media (max-width: 700px) {
       h1 { font-size: 1.3em; }
@@ -111,9 +144,52 @@
       #main { gap: 3px; }
       button { font-size: 0.85em; }
     }
+    /* --- Zone lobby visible --- */
+    #zoneLobbyAll {
+      margin: 20px auto;
+      background: #f0f4fa;
+      border-radius: 10px;
+      max-width: 500px;
+      box-shadow: 0 2px 10px #0001;
+      padding: 16px 22px;
+      display: none;
+    }
+    #zoneLobbyAll h2 {
+      margin-top: 0;
+    }
+    #listeLobbyParties {
+      margin-bottom: 12px;
+    }
+    #zoneLobbyAll button {
+      background: #3084c4;
+      color: #fff;
+      border: none;
+    }
+    #zoneLobbyAll button:hover {
+      background: #1d668f;
+    }
+    .lobby-entry {
+      margin: 5px 0;
+      padding: 7px 14px;
+      border-radius: 6px;
+      background: #e9f2fb;
+      border: 1px solid #3084c4;
+      font-size: 1em;
+      width: 100%;
+      text-align: left;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      transition: background 0.2s;
+    }
+    .lobby-entry:hover {
+      background: #c9e8fa;
+    }
   </style>
 </head>
 <body>
+<div id="notificationArea"></div>
 <div id="historiqueModal">
   <div class="box">
     <h3>Historique des cartes jouées</h3>
@@ -121,6 +197,13 @@
     <button onclick="document.getElementById('historiqueModal').style.display='none'" style="margin-top:10px;">Fermer</button>
   </div>
 </div>
+
+  <!-- Zone lobby global -->
+  <div id="zoneLobbyAll">
+    <h2>Liste des parties ouvertes</h2>
+    <div id="listeLobbyParties"></div>
+    <button id="btnCreerLobby">Créer une nouvelle partie</button>
+  </div>
 
   <div id="menuAccueil">
     <h2>Bienvenue dans The Game</h2>
