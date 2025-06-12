@@ -18,7 +18,11 @@ let historiqueCartesJouees = [];
 
 const PARTIE_TIMEOUT = 30 * 60 * 1000; // 30 min en ms
 
-// === NOTIFICATIONS VISUELLES (NOUVEAU) ===
+// Stocke les références des listeners et intervalles pour les nettoyer
+window.firebasePartieListener = null;
+window.partieTimeoutInterval = null;
+
+// === NOTIFICATIONS VISUELLES ===
 function showNotification(msg) {
   const area = document.getElementById('notificationArea');
   if (!area) return;
@@ -29,15 +33,14 @@ function showNotification(msg) {
   setTimeout(() => notif.remove(), 4500);
 }
 
-// === LOBBY GLOBAL (NOUVEAU) ===
+// === LOBBY GLOBAL ===
 function afficherLobbyGlobal() {
   const zone = document.getElementById("zoneLobbyAll");
   const liste = document.getElementById("listeLobbyParties");
   if (!zone || !liste) return;
   zone.style.display = "";
   liste.innerHTML = "<i>Chargement...</i>";
-  // Correction pour le warning Firebase, assurez-vous que cette règle est dans vos règles Firebase
-  // ".indexOn": "etat"
+  // Important: Assurez-vous d'avoir ".indexOn": "etat" dans vos règles de sécurité Firebase
   db.ref('parties').orderByChild('etat').equalTo('attente').on('value', snap => {
     liste.innerHTML = "";
     let found = false;
@@ -352,7 +355,7 @@ async function creerPartie(pseudoJoueur, customId) {
     return;
   }
   partieId = customId;
-  pseudo = pseudoJoueur; // Définir le pseudo ici aussi pour consistance
+  pseudo = pseudoJoueur;
   const partieData = {
     joueurs: {
       [pseudoJoueur]: { prêt: false, isCreator: true, mainIndex: 0 }
@@ -401,7 +404,6 @@ async function rejoindrePartie(idPartie, pseudoJoueur) {
             // Si le joueur existe déjà, on ne fait rien dans la transaction (il est "reconnecté")
             if (joueursData[pseudoJoueur]) {
                 console.log(`DEBUG: Pseudo '${pseudoJoueur}' déjà présent dans la partie. Confirmation.`);
-                // Pas besoin de throw, juste retourner les données actuelles
                 return joueursData;
             }
             console.log("DEBUG: Joueurs existants:", Object.keys(joueursData).length);
@@ -415,7 +417,6 @@ async function rejoindrePartie(idPartie, pseudoJoueur) {
             joueursData[pseudoJoueur] = { prêt: false, isCreator: false, mainIndex };
         } else {
             console.log("DEBUG: Initialisation du premier joueur de la partie.");
-            // Ce cas est rare pour un "rejoindre" si la partie existe déjà et a un état.
             joueursData = { [pseudoJoueur]: { prêt: false, isCreator: false, mainIndex: 0 } };
         }
         return joueursData;
@@ -433,10 +434,7 @@ async function rejoindrePartie(idPartie, pseudoJoueur) {
         afficherLobbyMessage(`Rejoint la partie ${partieId}`);
     } else if (partieState.etat === "en_cours") {
         console.log("DEBUG: Partie en cours, cacher lobby et mettre à jour le jeu.");
-        cacherLobby(); // Masque le lobby et affiche le jeu
-        // updateInterfaceAvecEtat() sera appelé par ecouterPartie() après la mise à jour des données.
-        // On peut l'appeler explicitement ici si on veut une mise à jour synchrone très rapide
-        // mais souvent la 'value' listener de ecouterPartie suffit.
+        cacherLobby();
     }
 
     localStorage.setItem('lastPartieId', idPartie);
@@ -444,8 +442,8 @@ async function rejoindrePartie(idPartie, pseudoJoueur) {
     console.log("DEBUG: Fin de rejoindrePartie (succès).");
 
   } catch (e) {
-    console.error("DEBUG: Erreur capturée dans rejoindrePartie:", e); // <-- Très important!
-    document.getElementById("menuMessage").innerText = String(e); // S'assurer que c'est une string
+    console.error("DEBUG: Erreur capturée dans rejoindrePartie:", e);
+    document.getElementById("menuMessage").innerText = String(e);
     localStorage.removeItem('lastPartieId');
     localStorage.removeItem('lastPseudo');
     afficherMenuAccueil();
@@ -473,8 +471,6 @@ function pretLobby() {
   updateLastActive();
   db.ref(`parties/${partieId}/joueurs/${pseudo}/prêt`).set(true)
     .then(() => {
-      // updateLobbyAffichage() sera appelé par le listener de ecouterPartie()
-      // une fois que la DB est mise à jour.
       console.log("DEBUG: Statut 'prêt' mis à jour dans Firebase.");
     })
     .catch(error => {
@@ -486,9 +482,7 @@ async function demarrerPartie() {
   updateLastActive();
   let deck = Array.from({ length: 98 }, (_, i) => i + 2).sort(() => Math.random() - 0.5);
   const joueursList = Object.entries(etatPartie.joueurs);
-  // Assurez-vous que les index des mains correspondent à ceux stockés pour chaque joueur
-  // On doit distribuer les cartes en respectant l'ordre des mainIndex
-  const mainsInit = Array.from({length: 4}).fill([]); // Initialise 4 mains vides
+  const mainsInit = Array.from({length: 4}).fill([]);
   joueursList.forEach(([,j]) => {
       mainsInit[j.mainIndex] = deck.splice(0, 8);
   });
@@ -504,20 +498,62 @@ async function demarrerPartie() {
       { id: 4, type: 'descendante', value: 100 }
     ],
     joueurActuel: 0,
-    cartesAJouer: Math.min(3, mainsInit[0]?.length || 0), // Assurez-vous que mainInit[0] existe
+    cartesAJouer: Math.min(3, mainsInit[0]?.length || 0),
     historique: [],
     lastActive: Date.now()
   });
 }
-function quitterLobby() {
-  localStorage.removeItem('lastPartieId');
-  localStorage.removeItem('lastPseudo');
-  window.location.reload();
+
+// Fonction modifiée pour supprimer la partie si elle est vide et en attente
+async function quitterLobby() {
+    console.log("DEBUG: Tentative de quitter le lobby.");
+    if (!partieId || !pseudo) {
+        console.log("DEBUG: partieId ou pseudo non définis, réinitialisation simple.");
+        localStorage.removeItem('lastPartieId');
+        localStorage.removeItem('lastPseudo');
+        window.location.reload();
+        return;
+    }
+
+    const joueurRef = db.ref(`parties/${partieId}/joueurs/${pseudo}`);
+    try {
+        await joueurRef.remove();
+        console.log(`DEBUG: Joueur '${pseudo}' retiré de la partie '${partieId}'.`);
+
+        // Vérifier si la partie est vide après le départ
+        const joueursSnapshot = await db.ref(`parties/${partieId}/joueurs`).once('value');
+        if (!joueursSnapshot.exists() || Object.keys(joueursSnapshot.val()).length === 0) {
+            console.log(`DEBUG: Plus de joueurs dans la partie '${partieId}'. Vérification de l'état.`);
+            // Plus de joueurs, récupérer l'état actuel de la partie pour décider de la suppression
+            const partieSnapshot = await db.ref(`parties/${partieId}`).once('value');
+            const partieData = partieSnapshot.val();
+
+            if (partieData && partieData.etat === "attente") {
+                await db.ref(`parties/${partieId}`).remove();
+                console.log(`DEBUG: Partie '${partieId}' supprimée car vide et en attente.`);
+                showNotification(`Partie '${partieId}' supprimée.`);
+            } else if (partieData) {
+                console.log(`DEBUG: Partie '${partieId}' n'est pas en attente (état: ${partieData.etat}), ne pas supprimer.`);
+            } else {
+                console.log(`DEBUG: La partie '${partieId}' n'existe plus (peut-être déjà supprimée par timeout ou autre).`);
+            }
+        } else {
+            console.log(`DEBUG: Des joueurs restent dans la partie '${partieId}', ne pas supprimer.`);
+        }
+    } catch (error) {
+        console.error("DEBUG: Erreur lors du retrait du joueur ou de la suppression de la partie:", error);
+        showNotification("Erreur lors de la déconnexion de la partie.");
+    } finally {
+        localStorage.removeItem('lastPartieId');
+        localStorage.removeItem('lastPseudo');
+        window.location.reload(); // Recharger la page pour un nettoyage complet de l'état
+    }
 }
+
 
 // Bloc de suppression automatique (notification visuelle si expiration)
 function verifierSuppressionAuto() {
-  // Clear any existing interval to prevent duplicates if called multiple times
+  // Nettoie l'intervalle existant pour éviter les doublons
   if (window.partieTimeoutInterval) {
     clearInterval(window.partieTimeoutInterval);
   }
@@ -538,13 +574,12 @@ function verifierSuppressionAuto() {
 
 // Bloc d'écoute de la partie (notification visuelle si suppression)
 function ecouterPartie() {
-  // Detach any previous listener to prevent multiple listeners on the same path
+  // Détache le listener précédent pour éviter les listeners multiples
   if (window.firebasePartieListener) {
     db.ref(`parties/${partieId}`).off('value', window.firebasePartieListener);
   }
 
   const partieRef = db.ref(`parties/${partieId}`);
-  // Store the listener function for later detachment
   window.firebasePartieListener = snapshot => {
     const data = snapshot.val();
     console.log("DEBUG: ecouterPartie - Données Firebase reçues:", data);
@@ -553,9 +588,9 @@ function ecouterPartie() {
       showNotification("La partie a été supprimée ou expirée.");
       localStorage.removeItem('lastPartieId');
       localStorage.removeItem('lastPseudo');
-      // Assurez-vous de rediriger proprement si la partie n'existe plus
+      // S'assurer de rediriger proprement si la partie n'existe plus et qu'on n'est pas déjà sur le menu
       if (document.getElementById("jeu").style.display !== "none" || document.getElementById("lobby").style.display !== "none") {
-        afficherMenuAccueil(); // Retour au menu principal
+        afficherMenuAccueil();
       }
       return;
     }
@@ -781,7 +816,6 @@ async function finTour() {
   const joueursActifsIndexes = Object.values(joueurs).map(j => j.mainIndex).sort((a,b)=>a-b);
   let originalNouveauJoueurIndex = nouveauJoueur;
   let foundNext = false;
-  // Cherche le prochain joueur dans l'ordre des mainIndex
   for (let i = 0; i < joueurCount; i++) {
       if (joueursActifsIndexes.includes(nouveauJoueur)) {
           foundNext = true;
@@ -789,12 +823,10 @@ async function finTour() {
       }
       nouveauJoueur = (nouveauJoueur + 1) % joueurCount;
   }
-  // Fallback si personne n'est trouvé (ne devrait pas arriver si des joueurs sont présents)
   if (!foundNext && joueursActifsIndexes.length > 0) {
       nouveauJoueur = joueursActifsIndexes[0];
   } else if (joueursActifsIndexes.length === 0) {
-      // Aucun joueur actif, potentiellement la partie est vide
-      return; // Ne pas continuer le tour
+      return;
   }
 
   await db.ref(`parties/${partieId}`).update({
@@ -861,10 +893,11 @@ function checkReconnect() {
           showNotification("Vous avez quitté une partie. Reconnexion automatique possible !");
           const reconnexion = confirm("Souhaitez-vous rejoindre la dernière partie (" + lastId + ") avec le pseudo " + lastPseudo + " ?");
           if (reconnexion) {
-            console.log("DEBUG: Utilisateur a accepté la reconnexion.");
+            console.log("DEBUG: Utilisateur a accepté la reconnexion. Pré-remplissage des champs.");
             document.getElementById("idPartie").value = lastId;
             document.getElementById("pseudo").value = lastPseudo;
-            rejoindrePartie(lastId, lastPseudo); // Tenter la reconnexion directement
+            console.log("DEBUG: Appel de rejoindrePartie avec ID:", lastId, "Pseudo:", lastPseudo);
+            rejoindrePartie(lastId, lastPseudo);
           } else {
             console.log("DEBUG: Utilisateur a refusé la reconnexion. Nettoyage localStorage.");
             localStorage.removeItem('lastPartieId');
@@ -905,7 +938,7 @@ function checkReconnect() {
 // =============== INITIALISATION AU CHARGEMENT ===============
 window.onload = () => {
   console.log("DEBUG: window.onload - Initialisation de l'application.");
-  checkReconnect(); // Lance la vérification de reconnexion au démarrage
+  checkReconnect();
 
   document.getElementById("btnCreer").onclick = () => {
     const pseudoInput = document.getElementById("pseudo");
@@ -942,7 +975,6 @@ window.onload = () => {
     if (!hist || hist.length === 0) {
       contenu.innerText = "Aucune action pour le moment.";
     } else {
-      // Pour une meilleure lisibilité, inverse l'ordre pour voir les dernières actions en premier
       contenu.innerText = hist.slice().reverse().join("\n");
     }
     modal.style.display = "flex";
