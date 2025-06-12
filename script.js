@@ -13,8 +13,10 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
 let partieId = null, pseudo = null, joueurs = {}, etatPartie = null, carteSelectionnee = null, cartesAJouer = 3;
-let modeSolo = false; // Ajouté pour différencier les modes
-let historiqueCartesJouees = []; // Pour multi et solo
+let modeSolo = false;
+let historiqueCartesJouees = [];
+
+const PARTIE_TIMEOUT = 30 * 60 * 1000; // 30 min en ms
 
 // --- MODE SOLO LOCAL ---
 let solo = {
@@ -149,7 +151,6 @@ function jouerCarteSolo(pile, carte) {
   let main = solo.joueurs[solo.joueurActuel].main;
   main.splice(main.indexOf(carte), 1);
   solo.cartesAJouer--;
-  // PAS DE pioche ici !
   if (main.length === 0 && solo.deck.length === 0) setTimeout(() => alert("Victoire collective !"), 300);
   return true;
 }
@@ -181,7 +182,6 @@ function jouerBotSolo() {
   }
   choix.sort((a, b) => a.ecart - b.ecart);
   let jouees = 0;
-
   function jouerUne() {
     if (jouees >= 3 || choix.length === 0) return finTourSolo();
     let { carte, pile } = choix.shift();
@@ -237,7 +237,6 @@ function jouerBotSolo() {
   jouerUne();
 }
 
-// --------- Détection d'absence de coup possible (utile pour les deux modes) ---------
 function aucunCoupPossible(main, piles) {
   for (let carte of main) {
     for (let pile of piles) {
@@ -246,16 +245,15 @@ function aucunCoupPossible(main, piles) {
         (pile.type === 'montante' && (carte > top || carte === top - 10)) ||
         (pile.type === 'descendante' && (carte < top || carte === top + 10))
       ) {
-        return false; // Au moins un coup possible
+        return false;
       }
     }
   }
-  return true; // Aucun coup possible
+  return true;
 }
 
-// --------- Modale game over SOLO ---------
 function afficherGameOverSolo() {
-  if (document.getElementById("gameOverSoloModal")) return; // évite doublon
+  if (document.getElementById("gameOverSoloModal")) return;
   const modal = document.createElement('div');
   modal.id = "gameOverSoloModal";
   modal.style.position = "fixed";
@@ -287,7 +285,15 @@ function afficherGameOverSolo() {
     afficherMenuAccueil();
   };
 }
+
 // =============== MULTIJOUEUR ===============
+
+function updateLastActive() {
+  if (partieId) {
+    db.ref(`parties/${partieId}/lastActive`).set(Date.now());
+  }
+}
+
 async function creerPartie(pseudoJoueur, customId) {
   if (!customId) {
     alert("Veuillez choisir un ID de partie simple (ex: 123, abc)");
@@ -305,11 +311,13 @@ async function creerPartie(pseudoJoueur, customId) {
       [pseudoJoueur]: { prêt: false, isCreator: true, mainIndex: 0 }
     },
     etat: "attente",
-    historique: []
+    historique: [],
+    lastActive: Date.now()
   };
   await partieRef.set(partieData);
   pseudo = pseudoJoueur;
   ecouterPartie();
+  verifierSuppressionAuto();
   montrerLobby();
   afficherLobbyMessage(`Partie créée. ID : ${partieId}`);
 }
@@ -332,6 +340,7 @@ async function rejoindrePartie(idPartie, pseudoJoueur) {
       return joueurs;
     });
     ecouterPartie();
+    verifierSuppressionAuto();
     montrerLobby();
     afficherLobbyMessage(`Rejoint la partie ${partieId}`);
   } catch (e) {
@@ -355,9 +364,11 @@ function updateLobbyAffichage() {
   document.getElementById("btnDemarrer").style.display = (isCreator && tousPrets) ? "" : "none";
 }
 function pretLobby() {
+  updateLastActive();
   db.ref(`parties/${partieId}/joueurs/${pseudo}/prêt`).set(true);
 }
 async function demarrerPartie() {
+  updateLastActive();
   let deck = Array.from({ length: 98 }, (_, i) => i + 2).sort(() => Math.random() - 0.5);
   const joueursList = Object.entries(etatPartie.joueurs);
   const mainsInit = joueursList.map(([,j]) => deck.splice(0, 8));
@@ -373,11 +384,26 @@ async function demarrerPartie() {
     ],
     joueurActuel: 0,
     cartesAJouer: Math.min(3, mainsInit[0]?.length || 0),
-    historique: []
+    historique: [],
+    lastActive: Date.now()
   });
 }
 function quitterLobby() { window.location.reload(); }
 
+// Bloc de suppression automatique
+function verifierSuppressionAuto() {
+  setInterval(async () => {
+    if (!partieId) return;
+    const partieRef = db.ref(`parties/${partieId}`);
+    const snap = await partieRef.child('lastActive').get();
+    const last = snap.val();
+    if (last && (Date.now() - last > PARTIE_TIMEOUT)) {
+      await partieRef.remove();
+      alert("La partie a expiré après 30 minutes d'inactivité.");
+      window.location.reload();
+    }
+  }, 60 * 1000);
+}
 function ecouterPartie() {
   const partieRef = db.ref(`parties/${partieId}`);
   partieRef.on('value', snapshot => {
@@ -400,35 +426,52 @@ function ecouterPartie() {
   });
 }
 
-function afficherListeJoueurs(joueurs) {
+function afficherListeJoueurs(joueurs, mains, joueurActuel) {
   const div = document.getElementById("listeJoueurs");
-  div.innerHTML = "<h3>Joueurs connectés :</h3>";
+  div.innerHTML = "<h3>Joueurs connectés :</h3><ul>";
   Object.entries(joueurs).forEach(([nom, infos]) => {
-    div.innerHTML += `<p>${nom} ${infos.isCreator ? "(créateur)" : ""}</p>`;
+    let mainIndex = infos.mainIndex;
+    let nbcartes = mains && mains[mainIndex] ? mains[mainIndex].length : "?";
+    div.innerHTML += `<li>
+      ${nom} 
+      ${infos.isCreator ? "(créateur)" : ""} 
+      ${joueurActuel === mainIndex ? "<b> (joue)</b>" : ""}
+      &mdash; <span style="color:#888;">${nbcartes} carte${nbcartes>1?'s':''}</span>
+    </li>`;
   });
+  div.innerHTML += "</ul>";
 }
+
 function afficherMessage(msg) {
   document.getElementById("message").innerText = msg;
 }
+
+function getNomJoueurParIndex(idx) {
+  for (let nom in joueurs) {
+    if (joueurs[nom].mainIndex === idx) return nom;
+  }
+  return "Joueur " + (idx+1);
+}
+
 function updateInterfaceAvecEtat() {
   if (!etatPartie) return;
-  afficherListeJoueurs(joueurs);
-  cartesAJouer = etatPartie.cartesAJouer;
   const mainIndex = joueurs[pseudo]?.mainIndex;
-  if (mainIndex === undefined) return alert("Tu n'es pas dans cette partie !");
+  afficherListeJoueurs(joueurs, etatPartie.mains, etatPartie.joueurActuel);
   updateAffichagePartie(
-    etatPartie.mains[mainIndex],
+    etatPartie.mains[mainIndex],    // toujours la main du joueur connecté !
     etatPartie.piles,
     etatPartie.joueurActuel,
-    cartesAJouer
+    etatPartie.cartesAJouer
   );
-  if (etatPartie.joueurActuel === joueurs[pseudo].mainIndex) {
+  if (etatPartie.joueurActuel === mainIndex) {
     enableInteraction(true);
+    afficherMessage("C'est votre tour !");
   } else {
     enableInteraction(false);
-    afficherMessage(`Tour du joueur ${etatPartie.joueurActuel + 1}`);
+    afficherMessage(`Tour de ${getNomJoueurParIndex(etatPartie.joueurActuel)}`);
   }
 }
+
 function updateAffichagePartie(main, pilesData, joueurActuelIndex, cartesAJouerRestantes) {
   const zonePiles = document.getElementById("piles");
   zonePiles.innerHTML = '';
@@ -478,6 +521,7 @@ function updateAffichagePartie(main, pilesData, joueurActuelIndex, cartesAJouerR
     afficherGameOverMulti();
   }
 }
+
 function enableInteraction(active) {
   const mainDiv = document.getElementById("main");
   if (active) {
@@ -504,6 +548,7 @@ function selectionnerCarte(c) {
 async function poserCarteFirebase(pile) {
   if (carteSelectionnee === null) return;
   if (etatPartie.joueurActuel !== joueurs[pseudo].mainIndex) return;
+  updateLastActive();
   const mainIndex = joueurs[pseudo].mainIndex;
   const main = [...etatPartie.mains[mainIndex]];
   const carte = carteSelectionnee;
@@ -516,7 +561,6 @@ async function poserCarteFirebase(pile) {
   nouvellesPiles = nouvellesPiles.map(p => p.id === pile.id ? {...p, value: carte} : p);
   let nouvelleMain = [...main];
   nouvelleMain.splice(nouvelleMain.indexOf(carte),1);
-  // PAS DE pioche ici !
   let nouvellesMains = [...etatPartie.mains];
   nouvellesMains[mainIndex] = nouvelleMain;
   let nouveauxCartesAJouer = etatPartie.cartesAJouer - 1;
@@ -530,7 +574,8 @@ async function poserCarteFirebase(pile) {
     mains: nouvellesMains,
     deck: etatPartie.deck,
     cartesAJouer: nouveauxCartesAJouer,
-    historique: hist
+    historique: hist,
+    lastActive: Date.now()
   });
   carteSelectionnee = null;
 }
@@ -540,7 +585,7 @@ async function finTour() {
     alert(`Vous devez jouer encore ${etatPartie.cartesAJouer} carte(s)`);
     return;
   }
-  // Piocher pour revenir à 8 cartes à la fin du tour !
+  updateLastActive();
   let mains = [...etatPartie.mains];
   let deck = [...etatPartie.deck];
   const mainIndex = joueurs[pseudo].mainIndex;
@@ -560,13 +605,13 @@ async function finTour() {
     mains: mains,
     deck: deck,
     joueurActuel: nouveauJoueur,
-    cartesAJouer: Math.min(3, mains[nouveauJoueur]?.length || 0)
+    cartesAJouer: Math.min(3, mains[nouveauJoueur]?.length || 0),
+    lastActive: Date.now()
   });
 }
 
-// --------- Modale game over MULTI ---------
 function afficherGameOverMulti() {
-  if (document.getElementById("gameOverMultiModal")) return; // évite doublon
+  if (document.getElementById("gameOverMultiModal")) return;
   const modal = document.createElement('div');
   modal.id = "gameOverMultiModal";
   modal.style.position = "fixed";
@@ -591,7 +636,6 @@ function afficherGameOverMulti() {
   document.body.appendChild(modal);
   document.getElementById("btnRestartMulti").onclick = () => {
     modal.remove();
-    // Seul le créateur relance la partie pour tous :
     if (joueurs[pseudo]?.isCreator) {
       demarrerPartie();
     } else {
