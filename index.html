@@ -3,9 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <title>The Game - Multi-joueurs Firebase</title>
-  <link rel="stylesheet" href="styles.css" />
   <style>
-    /* Simple cache initial pour le jeu */
+    /* Styles de base pour le menu et le jeu */
     #jeu, #headerJeu {
       display: none;
     }
@@ -29,6 +28,60 @@
       padding: 10px 20px;
       font-size: 16px;
       cursor: pointer;
+    }
+    #piles {
+      display: flex;
+      gap: 10px;
+      margin: 15px 0;
+    }
+    .pile {
+      cursor: pointer;
+      border: 2px solid #444;
+      border-radius: 6px;
+      padding: 15px;
+      width: 60px;
+      text-align: center;
+      user-select: none;
+      white-space: pre-line;
+    }
+    .montante {
+      background-color: #d0f0d0;
+    }
+    .descendante {
+      background-color: #f0d0d0;
+    }
+    #main {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+    .carte {
+      cursor: pointer;
+      border: 2px solid #222;
+      border-radius: 6px;
+      padding: 10px 15px;
+      background: #fff;
+      user-select: none;
+    }
+    .carte.selected {
+      border-color: #007bff;
+      background: #cce5ff;
+    }
+    .zone-info {
+      margin-top: 10px;
+    }
+    #info {
+      margin-top: 10px;
+      font-weight: bold;
+    }
+    #headerJeu {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 20px;
+      background-color: #eee;
+      margin-bottom: 10px;
     }
   </style>
 </head>
@@ -60,8 +113,17 @@
       <div id="main"></div>
       <button id="btnFinTour" disabled>Fin du tour</button>
     </div>
+
+    <div id="listeJoueurs"></div>
+    <div id="message"></div>
   </main>
 
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
+
+  <!-- Script du jeu -->
   <script src="script.js"></script>
+
 </body>
 </html>
