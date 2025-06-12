@@ -3,13 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <title>The Game - Multi et Solo</title>
-  <link rel="stylesheet" href="styles.css">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     body {
-      font-family: Arial;
+      font-family: Arial, sans-serif;
       background: #eee;
       padding: 20px;
       color: #000;
+      margin: 0;
     }
     h1 { text-align: center; }
     .zone { display: flex; justify-content: space-around; flex-wrap: wrap; }
@@ -87,6 +88,28 @@
       transition: all 0.5s ease;
       z-index: 2000;
       border-radius: 5px;
+    }
+    /* ------ Responsive design ------ */
+    @media (max-width: 700px) {
+      h1 { font-size: 1.3em; }
+      .zone { flex-direction: column; align-items: center; }
+      .pile { width: 80vw; min-width: 100px; max-width: 98vw; height: 90px; font-size: 1.1em; margin: 8px 0; }
+      .main { flex-wrap: wrap; gap: 7px; padding: 4px; }
+      .carte { width: 55px; height: 76px; font-size: 1em; line-height: 76px; }
+      .zone-info { padding: 5px; }
+      button { width: 100%; font-size: 1em; margin: 8px 0; }
+      #setupBox, #soloModal > div, #historiqueModal .box {
+        width: 95vw !important; max-width: none !important; margin: 10px auto !important;
+        box-sizing: border-box;
+      }
+      #main { width: 100vw; max-width: 99vw; }
+      #menuAccueil, #lobby, #jeu { padding: 2vw; }
+    }
+    @media (max-width: 400px) {
+      .pile { font-size: 0.9em; }
+      .carte { width: 36px; height: 54px; font-size: 0.9em; line-height: 54px; }
+      #main { gap: 3px; }
+      button { font-size: 0.85em; }
     }
   </style>
 </head>
