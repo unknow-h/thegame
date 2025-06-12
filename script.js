@@ -113,6 +113,15 @@ function updateAffichageSolo() {
   document.getElementById("btnFinTour").onclick = finTourSolo;
   document.getElementById("btnFinTour").disabled = solo.cartesAJouer > 0;
   document.getElementById("btnFinTour").style.display = "";
+
+  // Vérifie l'absence de coup possible
+  if (
+    !solo.bots[solo.joueurActuel] &&
+    solo.joueurs[solo.joueurActuel].main.length > 0 &&
+    aucunCoupPossible(solo.joueurs[solo.joueurActuel].main, solo.piles)
+  ) {
+    afficherGameOverSolo();
+  }
 }
 
 function selectionnerCarteSolo(c) {
@@ -228,8 +237,57 @@ function jouerBotSolo() {
   jouerUne();
 }
 
+// --------- Détection d'absence de coup possible (utile pour les deux modes) ---------
+function aucunCoupPossible(main, piles) {
+  for (let carte of main) {
+    for (let pile of piles) {
+      let top = pile.value;
+      if (
+        (pile.type === 'montante' && (carte > top || carte === top - 10)) ||
+        (pile.type === 'descendante' && (carte < top || carte === top + 10))
+      ) {
+        return false; // Au moins un coup possible
+      }
+    }
+  }
+  return true; // Aucun coup possible
+}
 
-// =============== MULTIJOUEUR (surbrillance cartes, historique, mode sombre, aide, etc) ===============
+// --------- Modale game over SOLO ---------
+function afficherGameOverSolo() {
+  if (document.getElementById("gameOverSoloModal")) return; // évite doublon
+  const modal = document.createElement('div');
+  modal.id = "gameOverSoloModal";
+  modal.style.position = "fixed";
+  modal.style.top = "0";
+  modal.style.left = "0";
+  modal.style.width = "100vw";
+  modal.style.height = "100vh";
+  modal.style.background = "rgba(0,0,0,0.85)";
+  modal.style.color = "#fff";
+  modal.style.zIndex = 2500;
+  modal.style.display = "flex";
+  modal.style.alignItems = "center";
+  modal.style.justifyContent = "center";
+  modal.innerHTML = `
+    <div style="background:#222;padding:30px;border-radius:10px;text-align:center;max-width:320px">
+      <h2>Aucun coup possible</h2>
+      <p>Vous ne pouvez poser aucune carte.<br>Voulez-vous recommencer ou quitter ?</p>
+      <button id="btnRestartSolo">Recommencer</button>
+      <button id="btnQuitSolo" style="margin-left:20px;">Quitter</button>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  document.getElementById("btnRestartSolo").onclick = () => {
+    modal.remove();
+    lancerPartieSolo();
+  };
+  document.getElementById("btnQuitSolo").onclick = () => {
+    modal.remove();
+    afficherMenuAccueil();
+  };
+}
+// =============== MULTIJOUEUR ===============
 async function creerPartie(pseudoJoueur, customId) {
   if (!customId) {
     alert("Veuillez choisir un ID de partie simple (ex: 123, abc)");
@@ -410,6 +468,15 @@ function updateAffichagePartie(main, pilesData, joueurActuelIndex, cartesAJouerR
   document.getElementById("btnFinTour").disabled = cartesAJouerRestantes > 0;
   document.getElementById("btnFinTour").onclick = finTour;
   document.getElementById("btnFinTour").style.display = "";
+
+  // Vérifie l'absence de coup possible pour le joueur courant
+  if (
+    etatPartie.joueurActuel === joueurs[pseudo].mainIndex &&
+    main.length > 0 &&
+    aucunCoupPossible(main, pilesData)
+  ) {
+    afficherGameOverMulti();
+  }
 }
 function enableInteraction(active) {
   const mainDiv = document.getElementById("main");
@@ -495,6 +562,46 @@ async function finTour() {
     joueurActuel: nouveauJoueur,
     cartesAJouer: Math.min(3, mains[nouveauJoueur]?.length || 0)
   });
+}
+
+// --------- Modale game over MULTI ---------
+function afficherGameOverMulti() {
+  if (document.getElementById("gameOverMultiModal")) return; // évite doublon
+  const modal = document.createElement('div');
+  modal.id = "gameOverMultiModal";
+  modal.style.position = "fixed";
+  modal.style.top = "0";
+  modal.style.left = "0";
+  modal.style.width = "100vw";
+  modal.style.height = "100vh";
+  modal.style.background = "rgba(0,0,0,0.85)";
+  modal.style.color = "#fff";
+  modal.style.zIndex = 2500;
+  modal.style.display = "flex";
+  modal.style.alignItems = "center";
+  modal.style.justifyContent = "center";
+  modal.innerHTML = `
+    <div style="background:#222;padding:30px;border-radius:10px;text-align:center;max-width:320px">
+      <h2>Aucun coup possible</h2>
+      <p>Vous ne pouvez poser aucune carte.<br>Voulez-vous recommencer ou quitter ?</p>
+      <button id="btnRestartMulti">Recommencer</button>
+      <button id="btnQuitMulti" style="margin-left:20px;">Quitter</button>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  document.getElementById("btnRestartMulti").onclick = () => {
+    modal.remove();
+    // Seul le créateur relance la partie pour tous :
+    if (joueurs[pseudo]?.isCreator) {
+      demarrerPartie();
+    } else {
+      alert("Seul le créateur peut relancer la partie.");
+    }
+  };
+  document.getElementById("btnQuitMulti").onclick = () => {
+    modal.remove();
+    afficherMenuAccueil();
+  };
 }
 
 // =============== OPTIONS COMMUNES ================
