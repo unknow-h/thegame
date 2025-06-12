@@ -749,6 +749,11 @@ window.onload = () => {
   document.getElementById("btnSolo").onclick = ouvrirSoloModal;
   document.getElementById("btnLancerSolo").onclick = lancerPartieSolo;
 
+  // === AJOUTE ICI LES LIGNES POUR LE MULTIJOUEUR ===
+  document.getElementById("btnPret").onclick = pretLobby;
+  document.getElementById("btnDemarrer").onclick = demarrerPartie;
+  document.getElementById("btnQuitterLobby").onclick = quitterLobby;
+
   document.getElementById("themeToggle").onchange = e => {
     if (e.target.checked) document.body.classList.add("dark");
     else document.body.classList.remove("dark");
