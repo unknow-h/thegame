@@ -103,3 +103,21 @@ body.dark button {
   text-align: center;
   user-select: none;
 }
+/* Lobby styles (also in index.html for quick test) */
+#lobby {
+  position: fixed;
+  background: #fff;
+  border: 2px solid #333;
+  border-radius: 8px;
+  padding: 30px 40px;
+  top: 50%; left: 50%;
+  transform: translate(-50%,-50%);
+  z-index: 2000;
+  min-width: 320px;
+  min-height: 200px;
+  box-shadow: 0 0 15px #0005;
+  display: none;
+}
+#lobby h2 { text-align:center; }
+#lobby ul { list-style:none; padding:0; }
+#lobbyMessage {color:#333; margin-top:10px;}
