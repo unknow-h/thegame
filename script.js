@@ -4,7 +4,7 @@ const firebaseConfig = {
   authDomain: "the-game-30e6d.firebaseapp.com",
   databaseURL: "https://the-game-30e6d-default-rtdb.firebaseio.com",
   projectId: "the-game-30e6d",
-  storageBucket: "the-game-30e6d.firebasestorage.app",
+  storageBucket: "the-game-30e6d.appspot.com",
   messagingSenderId: "222102581853",
   appId: "1:222102581853:web:a211cfbed9dadc3cfe13b4",
   measurementId: "G-L2G22DJQFZ"
@@ -27,37 +27,16 @@ let cartesAJouer = 3;
 //////////////////////////
 
 // Créer une partie
-async function creerPartie(pseudoJoueur) {
+async function creerPartie(pseudoJoueur, useBots = false) {
   const partiesRef = db.ref('parties');
   const nouvellePartieRef = partiesRef.push();
   partieId = nouvellePartieRef.key;
 
-  const deckInit = Array.from({ length: 98 }, (_, i) => i + 2).sort(() => Math.random() - 0.5);
-
-  const mainsInit = [
-    deckInit.splice(0, 8),
-    deckInit.splice(0, 8),
-    deckInit.splice(0, 8),
-    deckInit.splice(0, 8)
-  ];
-
-  const pilesInit = [
-    { id: 1, type: 'montante', value: 1 },
-    { id: 2, type: 'montante', value: 1 },
-    { id: 3, type: 'descendante', value: 100 },
-    { id: 4, type: 'descendante', value: 100 }
-  ];
-
-  // Données initiales partie
   const partieData = {
     joueurs: {
       [pseudoJoueur]: { prêt: false, isCreator: true, mainIndex: 0 }
     },
-    mains: mainsInit,
-    piles: pilesInit,
-    deck: deckInit,
-    joueurActuel: 0,
-    cartesAJouer: 3,
+    useBots: useBots,
     etat: "attente" // ou "en_cours", "terminee"
   };
 
@@ -65,7 +44,8 @@ async function creerPartie(pseudoJoueur) {
   pseudo = pseudoJoueur;
 
   ecouterPartie();
-  afficherMessage(`Partie créée. ID : ${partieId}`);
+  montrerLobby();
+  afficherLobbyMessage(`Partie créée. ID : ${partieId}`);
 }
 
 // Rejoindre une partie existante
@@ -94,7 +74,8 @@ async function rejoindrePartie(idPartie, pseudoJoueur) {
       return joueurs;
     });
     ecouterPartie();
-    afficherMessage(`Rejoint la partie ${partieId} avec le pseudo ${pseudo}`);
+    montrerLobby();
+    afficherLobbyMessage(`Rejoint la partie ${partieId} avec le pseudo ${pseudo}`);
   } catch (e) {
     alert("Erreur en rejoignant la partie : " + e);
   }
@@ -112,48 +93,85 @@ function ecouterPartie() {
     etatPartie = data;
     joueurs = data.joueurs || {};
 
-    updateInterfaceAvecEtat();
+    // Affichage selon l'état
+    if (etatPartie.etat === "attente") {
+      montrerLobby();
+      updateLobbyAffichage();
+    } else if (etatPartie.etat === "en_cours") {
+      cacherLobby();
+      updateInterfaceAvecEtat();
+    } else if (etatPartie.etat === "terminee") {
+      cacherLobby();
+      afficherMessage("Partie terminée !");
+      enableInteraction(false);
+    }
   });
 }
 
-// Met à jour l'interface selon l'état Firebase reçu
-function updateInterfaceAvecEtat() {
+//////////////////////////////
+// LOBBY
+//////////////////////////////
+
+function montrerLobby() {
+  document.getElementById("menuAccueil").style.display = "none";
+  document.getElementById("headerJeu").style.display = "none";
+  document.getElementById("jeu").style.display = "none";
+  document.getElementById("lobby").style.display = "block";
+}
+function cacherLobby() {
+  document.getElementById("lobby").style.display = "none";
+  document.getElementById("headerJeu").style.display = "flex";
+  document.getElementById("jeu").style.display = "block";
+}
+function afficherLobbyMessage(msg) {
+  document.getElementById("lobbyMessage").innerText = msg;
+}
+function updateLobbyAffichage() {
   if (!etatPartie) return;
+  // List players and their status
+  const lobbyJoueurs = document.getElementById("lobbyJoueurs");
+  lobbyJoueurs.innerHTML = "<b>Joueurs connectés :</b><ul>";
+  Object.entries(joueurs).forEach(([nom, infos]) => {
+    lobbyJoueurs.innerHTML += `<li>${nom} ${infos.isCreator ? "(créateur)" : ""} - ${infos.prêt ? "✅ Prêt" : "⏳"}</li>`;
+  });
+  lobbyJoueurs.innerHTML += "</ul>";
 
-  // Affiche liste joueurs
-  afficherListeJoueurs(joueurs);
+  // Show start button only for creator and when all are ready
+  const creator = Object.entries(joueurs).find(([n, j]) => j.isCreator);
+  const tousPrets = Object.values(joueurs).length > 1 && Object.values(joueurs).every(j => j.prêt);
+  const isCreator = joueurs[pseudo]?.isCreator;
+  document.getElementById("btnDemarrer").style.display = (isCreator && tousPrets) ? "" : "none";
+}
 
-  if (etatPartie.etat === "attente") {
-    afficherMessage("En attente des joueurs...");
-  } else if (etatPartie.etat === "en_cours") {
-    // Met à jour la partie de jeu en cours
-    cartesAJouer = etatPartie.cartesAJouer;
-    // Trouve l'index main du joueur connecté
-    const mainIndex = joueurs[pseudo]?.mainIndex;
-    if (mainIndex === undefined) {
-      alert("Tu n'es pas dans cette partie !");
-      return;
-    }
-    // Met à jour mains, piles, joueurActuel
-    // Toutes ces données sont synchronisées depuis Firebase
-    updateAffichagePartie(
-      etatPartie.mains[mainIndex],
-      etatPartie.piles,
-      etatPartie.joueurActuel,
-      cartesAJouer
-    );
+// Mark player as ready
+function pretLobby() {
+  db.ref(`parties/${partieId}/joueurs/${pseudo}/prêt`).set(true);
+}
 
-    if (etatPartie.joueurActuel === joueurs[pseudo].mainIndex) {
-      // C’est ton tour !
-      enableInteraction(true);
-    } else {
-      enableInteraction(false);
-      afficherMessage(`Tour du joueur ${etatPartie.joueurActuel + 1}`);
-    }
-  } else if (etatPartie.etat === "terminee") {
-    afficherMessage("Partie terminée !");
-    enableInteraction(false);
-  }
+// Start the game (only creator)
+async function demarrerPartie() {
+  // Shuffle deck, hands, assign bots if needed
+  let deck = Array.from({ length: 98 }, (_, i) => i + 2).sort(() => Math.random() - 0.5);
+  const joueursList = Object.entries(etatPartie.joueurs);
+  const mainsInit = joueursList.map(([,j]) => deck.splice(0, 8));
+  await db.ref(`parties/${partieId}`).update({
+    etat: "en_cours",
+    mains: mainsInit,
+    deck: deck,
+    piles: [
+      { id: 1, type: 'montante', value: 1 },
+      { id: 2, type: 'montante', value: 1 },
+      { id: 3, type: 'descendante', value: 100 },
+      { id: 4, type: 'descendante', value: 100 }
+    ],
+    joueurActuel: 0,
+    cartesAJouer: 3
+  });
+}
+
+// Quit lobby (just reload for now)
+function quitterLobby() {
+  window.location.reload();
 }
 
 //////////////////////////////
@@ -282,12 +300,13 @@ async function finTour() {
     alert(`Vous devez jouer encore ${etatPartie.cartesAJouer} carte(s)`);
     return;
   }
-  let nouveauJoueur = (etatPartie.joueurActuel + 1) % 4;
+  let joueurCount = Object.keys(joueurs).length;
+  let nouveauJoueur = (etatPartie.joueurActuel + 1) % joueurCount;
 
   // Assure que le nouveau joueur est dans la partie (sinon on boucle)
   const joueursKeys = Object.values(joueurs).map(j => j.mainIndex);
   while (!joueursKeys.includes(nouveauJoueur)) {
-    nouveauJoueur = (nouveauJoueur + 1) % 4;
+    nouveauJoueur = (nouveauJoueur + 1) % joueurCount;
   }
 
   await db.ref(`parties/${partieId}`).update({
@@ -302,9 +321,9 @@ async function finTour() {
 
 function handleCreerPartie() {
   const pseudoInput = document.getElementById("pseudo");
+  const useBots = document.getElementById("useBots").checked;
   if (!pseudoInput.value.trim()) return alert("Entrez un pseudo");
-  creerPartie(pseudoInput.value.trim());
-  cacherMenuAccueil();
+  creerPartie(pseudoInput.value.trim(), useBots);
 }
 
 function handleRejoindrePartie() {
@@ -312,7 +331,6 @@ function handleRejoindrePartie() {
   const idPartieInput = document.getElementById("idPartie");
   if (!pseudoInput.value.trim() || !idPartieInput.value.trim()) return alert("Entrez pseudo et ID partie");
   rejoindrePartie(idPartieInput.value.trim(), pseudoInput.value.trim());
-  cacherMenuAccueil();
 }
 
 function cacherMenuAccueil() {
@@ -325,6 +343,7 @@ function afficherMenuAccueil() {
   document.getElementById("menuAccueil").style.display = "flex";
   document.getElementById("headerJeu").style.display = "none";
   document.getElementById("jeu").style.display = "none";
+  document.getElementById("lobby").style.display = "none";
 }
 
 // Liaisons d'événements
@@ -334,15 +353,16 @@ window.onload = () => {
   document.getElementById("btnCreer").onclick = handleCreerPartie;
   document.getElementById("btnRejoindre").onclick = handleRejoindrePartie;
   document.getElementById("btnFinTour").onclick = finTour;
+  document.getElementById("btnPret").onclick = pretLobby;
+  document.getElementById("btnDemarrer").onclick = demarrerPartie;
+  document.getElementById("btnQuitterLobby").onclick = quitterLobby;
 
   // Optionnel : toggle thème sombre
   document.getElementById("themeToggle").onchange = e => {
     if (e.target.checked) {
-      document.body.style.backgroundColor = "#222";
-      document.body.style.color = "#eee";
+      document.body.classList.add("dark");
     } else {
-      document.body.style.backgroundColor = "";
-      document.body.style.color = "";
+      document.body.classList.remove("dark");
     }
   };
 };
