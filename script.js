@@ -64,7 +64,7 @@ function lancerPartieSolo() {
   solo.joueurs = Array.from({ length: 4 }, () => ({ main: solo.deck.splice(0, 8) }));
   solo.bots = Array.from({ length: 4 }, (_, i) => i >= nbHumains);
   solo.joueurActuel = 0;
-  solo.cartesAJouer = 3;
+  solo.cartesAJouer = Math.min(3, solo.joueurs[solo.joueurActuel].main.length);
   carteSelectionnee = null;
   solo.historique = [];
   updateAffichageSolo();
@@ -140,12 +140,19 @@ function jouerCarteSolo(pile, carte) {
   let main = solo.joueurs[solo.joueurActuel].main;
   main.splice(main.indexOf(carte), 1);
   solo.cartesAJouer--;
-  if (solo.deck.length > 0) main.push(solo.deck.pop());
+  // PAS DE pioche ici !
   if (main.length === 0 && solo.deck.length === 0) setTimeout(() => alert("Victoire collective !"), 300);
   return true;
 }
 function finTourSolo() {
   if (solo.cartesAJouer > 0) return;
+
+  // Piocher pour revenir à 8 cartes (ou moins si pioche vide)
+  let main = solo.joueurs[solo.joueurActuel].main;
+  while (main.length < 8 && solo.deck.length > 0) {
+    main.push(solo.deck.pop());
+  }
+
   solo.joueurActuel = (solo.joueurActuel + 1) % 4;
   solo.cartesAJouer = Math.min(3, solo.joueurs[solo.joueurActuel].main.length);
   carteSelectionnee = null;
@@ -307,7 +314,7 @@ async function demarrerPartie() {
       { id: 4, type: 'descendante', value: 100 }
     ],
     joueurActuel: 0,
-    cartesAJouer: 3,
+    cartesAJouer: Math.min(3, mainsInit[0]?.length || 0),
     historique: []
   });
 }
@@ -442,10 +449,7 @@ async function poserCarteFirebase(pile) {
   nouvellesPiles = nouvellesPiles.map(p => p.id === pile.id ? {...p, value: carte} : p);
   let nouvelleMain = [...main];
   nouvelleMain.splice(nouvelleMain.indexOf(carte),1);
-  let nouveauDeck = [...etatPartie.deck];
-  if (nouveauDeck.length > 0) {
-    nouvelleMain.push(nouveauDeck.pop());
-  }
+  // PAS DE pioche ici !
   let nouvellesMains = [...etatPartie.mains];
   nouvellesMains[mainIndex] = nouvelleMain;
   let nouveauxCartesAJouer = etatPartie.cartesAJouer - 1;
@@ -457,7 +461,7 @@ async function poserCarteFirebase(pile) {
   await db.ref(`parties/${partieId}`).update({
     piles: nouvellesPiles,
     mains: nouvellesMains,
-    deck: nouveauDeck,
+    deck: etatPartie.deck,
     cartesAJouer: nouveauxCartesAJouer,
     historique: hist
   });
@@ -469,6 +473,16 @@ async function finTour() {
     alert(`Vous devez jouer encore ${etatPartie.cartesAJouer} carte(s)`);
     return;
   }
+  // Piocher pour revenir à 8 cartes à la fin du tour !
+  let mains = [...etatPartie.mains];
+  let deck = [...etatPartie.deck];
+  const mainIndex = joueurs[pseudo].mainIndex;
+  let main = [...mains[mainIndex]];
+  while (main.length < 8 && deck.length > 0) {
+    main.push(deck.pop());
+  }
+  mains[mainIndex] = main;
+
   let joueurCount = Object.keys(joueurs).length;
   let nouveauJoueur = (etatPartie.joueurActuel + 1) % joueurCount;
   const joueursKeys = Object.values(joueurs).map(j => j.mainIndex);
@@ -476,8 +490,10 @@ async function finTour() {
     nouveauJoueur = (nouveauJoueur + 1) % joueurCount;
   }
   await db.ref(`parties/${partieId}`).update({
+    mains: mains,
+    deck: deck,
     joueurActuel: nouveauJoueur,
-    cartesAJouer: Math.min(3, etatPartie.mains[nouveauJoueur]?.length || 0)
+    cartesAJouer: Math.min(3, mains[nouveauJoueur]?.length || 0)
   });
 }
 
