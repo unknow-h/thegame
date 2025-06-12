@@ -1,3 +1,4 @@
+// --- MULTIJOUEUR FIREBASE ---
 const firebaseConfig = {
   apiKey: "AIzaSyC67w7K6BqcNkBh4yeNd4OfgvjAw_neO4k",
   authDomain: "the-game-30e6d.firebaseapp.com",
@@ -12,6 +13,19 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
 let partieId = null, pseudo = null, joueurs = {}, etatPartie = null, carteSelectionnee = null, cartesAJouer = 3;
+let modeSolo = false; // Ajouté pour différencier les modes
+let historiqueCartesJouees = []; // Pour multi et solo
+
+// --- MODE SOLO LOCAL ---
+let solo = {
+  deck: [],
+  joueurs: [],
+  piles: [],
+  joueurActuel: 0,
+  cartesAJouer: 3,
+  bots: [],
+  historique: []
+};
 
 function afficherMenuAccueil() {
   document.getElementById("menuAccueil").style.display = "block";
@@ -29,6 +43,186 @@ function cacherLobby() {
   document.getElementById("jeu").style.display = "block";
 }
 
+function ouvrirSoloModal() {
+  document.getElementById("soloModal").style.display = "flex";
+}
+function lancerPartieSolo() {
+  modeSolo = true;
+  document.getElementById("soloModal").style.display = "none";
+  document.getElementById("menuAccueil").style.display = "none";
+  document.getElementById("jeu").style.display = "block";
+  // Config
+  const nbHumains = Math.max(1, Math.min(4, parseInt(document.getElementById("nbJoueurs").value || "1")));
+  const nbBots = 4 - nbHumains;
+  solo.deck = Array.from({ length: 98 }, (_, i) => i + 2).sort(() => Math.random() - 0.5);
+  solo.piles = [
+    { id: 1, type: 'montante', value: 1 },
+    { id: 2, type: 'montante', value: 1 },
+    { id: 3, type: 'descendante', value: 100 },
+    { id: 4, type: 'descendante', value: 100 }
+  ];
+  solo.joueurs = Array.from({ length: 4 }, () => ({ main: solo.deck.splice(0, 8) }));
+  solo.bots = Array.from({ length: 4 }, (_, i) => i >= nbHumains);
+  solo.joueurActuel = 0;
+  solo.cartesAJouer = 3;
+  carteSelectionnee = null;
+  solo.historique = [];
+  updateAffichageSolo();
+  if (solo.bots[solo.joueurActuel]) jouerBotSolo();
+}
+function updateAffichageSolo() {
+  document.getElementById("info").innerText = `Joueur ${solo.joueurActuel + 1} (${solo.bots[solo.joueurActuel] ? 'Bot' : 'Humain'}) - Cartes à jouer: ${solo.cartesAJouer}`;
+  const zonePiles = document.getElementById("piles");
+  zonePiles.innerHTML = '';
+  solo.piles.forEach(pile => {
+    const div = document.createElement("div");
+    div.className = `pile ${pile.type}`;
+    div.innerText = `${pile.type === 'montante' ? '+' : '-'}\n${pile.value}`;
+    div.onclick = () => poserCarteSolo(pile);
+    zonePiles.appendChild(div);
+  });
+
+  const main = document.getElementById("main");
+  main.className = "main";
+  main.innerHTML = '';
+
+  // Surbrillance cartes "spéciales"
+  const mainTriee = [...solo.joueurs[solo.joueurActuel].main].sort((a, b) => a - b);
+  let cartesSpec = new Set();
+  for (let c of mainTriee) {
+    for (let pile of solo.piles) {
+      if (Math.abs(c - pile.value) === 10) cartesSpec.add(c);
+    }
+    for (let autre of mainTriee) {
+      if (c !== autre && Math.abs(c - autre) === 10) cartesSpec.add(c);
+    }
+  }
+
+  mainTriee.forEach(c => {
+    const carte = document.createElement("div");
+    carte.className = "carte";
+    carte.innerText = c;
+    carte.onclick = () => selectionnerCarteSolo(c);
+    if (cartesSpec.has(c)) carte.style.backgroundColor = "#ffe066";
+    if (c === carteSelectionnee) carte.classList.add("selected");
+    main.appendChild(carte);
+  });
+
+  document.getElementById("listeJoueurs").innerHTML = "";
+  document.getElementById("message").innerHTML = "";
+  document.getElementById("btnFinTour").onclick = finTourSolo;
+  document.getElementById("btnFinTour").disabled = solo.cartesAJouer > 0;
+  document.getElementById("btnFinTour").style.display = "";
+}
+
+function selectionnerCarteSolo(c) {
+  if (solo.bots[solo.joueurActuel]) return;
+  carteSelectionnee = carteSelectionnee === c ? null : c;
+  updateAffichageSolo();
+}
+function poserCarteSolo(pile) {
+  if (carteSelectionnee === null || solo.bots[solo.joueurActuel]) return;
+  if (jouerCarteSolo(pile, carteSelectionnee)) {
+    carteSelectionnee = null;
+    updateAffichageSolo();
+  }
+}
+function jouerCarteSolo(pile, carte) {
+  let top = pile.value;
+  if (pile.type === 'montante' && (carte > top || carte === top - 10)) {
+    pile.value = carte;
+  } else if (pile.type === 'descendante' && (carte < top || carte === top + 10)) {
+    pile.value = carte;
+  } else {
+    return false;
+  }
+  solo.historique.push(`Joueur ${solo.joueurActuel + 1} ➜ ${carte} sur pile ${pile.id} (${pile.type})`);
+  let main = solo.joueurs[solo.joueurActuel].main;
+  main.splice(main.indexOf(carte), 1);
+  solo.cartesAJouer--;
+  if (solo.deck.length > 0) main.push(solo.deck.pop());
+  if (main.length === 0 && solo.deck.length === 0) setTimeout(() => alert("Victoire collective !"), 300);
+  return true;
+}
+function finTourSolo() {
+  if (solo.cartesAJouer > 0) return;
+  solo.joueurActuel = (solo.joueurActuel + 1) % 4;
+  solo.cartesAJouer = Math.min(3, solo.joueurs[solo.joueurActuel].main.length);
+  carteSelectionnee = null;
+  updateAffichageSolo();
+  if (solo.bots[solo.joueurActuel]) jouerBotSolo();
+}
+function jouerBotSolo() {
+  let main = solo.joueurs[solo.joueurActuel].main;
+  let choix = [];
+  for (let carte of main) {
+    for (let pile of solo.piles) {
+      let top = pile.value;
+      let ok = (pile.type === 'montante' && (carte > top || carte === top - 10)) ||
+               (pile.type === 'descendante' && (carte < top || carte === top + 10));
+      if (ok) choix.push({ carte, pile, ecart: Math.abs(carte - top) });
+    }
+  }
+  choix.sort((a, b) => a.ecart - b.ecart);
+  let jouees = 0;
+
+  function jouerUne() {
+    if (jouees >= 3 || choix.length === 0) return finTourSolo();
+    let { carte, pile } = choix.shift();
+
+    // Animation
+    const mainDiv = document.getElementById("main");
+    const cartesDiv = Array.from(mainDiv.children);
+    const indexCarte = solo.joueurs[solo.joueurActuel].main.indexOf(carte);
+    if (indexCarte === -1) return jouerUne();
+
+    const carteElem = cartesDiv[indexCarte];
+    const rectCarte = carteElem.getBoundingClientRect();
+
+    // Trouver la position de la pile cible
+    const pilesDiv = document.getElementById("piles");
+    const pileDivs = Array.from(pilesDiv.children);
+    const pileIndex = solo.piles.findIndex(p => p.id === pile.id);
+    const pileElem = pileDivs[pileIndex];
+    const rectPile = pileElem.getBoundingClientRect();
+
+    // Créer la carte animée
+    const animCarte = document.createElement("div");
+    animCarte.className = "carte-anim";
+    animCarte.innerText = carte;
+    document.body.appendChild(animCarte);
+
+    // Position initiale
+    animCarte.style.left = rectCarte.left + "px";
+    animCarte.style.top = rectCarte.top + "px";
+    animCarte.offsetWidth;
+    // Position finale (au centre de la pile)
+    const leftFinal = rectPile.left + (rectPile.width - rectCarte.width) / 2;
+    const topFinal = rectPile.top + (rectPile.height - rectCarte.height) / 2;
+    animCarte.style.left = leftFinal + "px";
+    animCarte.style.top = topFinal + "px";
+    animCarte.style.width = "40px";
+    animCarte.style.height = "60px";
+    animCarte.style.lineHeight = "60px";
+    animCarte.style.fontSize = "18px";
+    animCarte.style.opacity = "0.7";
+    animCarte.addEventListener("transitionend", () => {
+      if (jouerCarteSolo(pile, carte)) {
+        updateAffichageSolo();
+        jouees++;
+        animCarte.remove();
+        setTimeout(jouerUne, 300);
+      } else {
+        animCarte.remove();
+        jouerUne();
+      }
+    }, { once: true });
+  }
+  jouerUne();
+}
+
+
+// =============== MULTIJOUEUR (surbrillance cartes, historique, mode sombre, aide, etc) ===============
 async function creerPartie(pseudoJoueur, customId) {
   if (!customId) {
     alert("Veuillez choisir un ID de partie simple (ex: 123, abc)");
@@ -45,7 +239,8 @@ async function creerPartie(pseudoJoueur, customId) {
     joueurs: {
       [pseudoJoueur]: { prêt: false, isCreator: true, mainIndex: 0 }
     },
-    etat: "attente"
+    etat: "attente",
+    historique: []
   };
   await partieRef.set(partieData);
   pseudo = pseudoJoueur;
@@ -112,7 +307,8 @@ async function demarrerPartie() {
       { id: 4, type: 'descendante', value: 100 }
     ],
     joueurActuel: 0,
-    cartesAJouer: 3
+    cartesAJouer: 3,
+    historique: []
   });
 }
 function quitterLobby() { window.location.reload(); }
@@ -124,6 +320,7 @@ function ecouterPartie() {
     if (!data) return alert("Partie supprimée ou inexistante.");
     etatPartie = data;
     joueurs = data.joueurs || {};
+    historiqueCartesJouees = data.historique || [];
     if (etatPartie.etat === "attente") {
       montrerLobby();
       updateLobbyAffichage();
@@ -180,16 +377,32 @@ function updateAffichagePartie(main, pilesData, joueurActuelIndex, cartesAJouerR
   const mainDiv = document.getElementById("main");
   mainDiv.className = "main";
   mainDiv.innerHTML = '';
-  main.sort((a, b) => a - b).forEach(c => {
+
+  // Surbrillance cartes spéciales (écart de 10)
+  let cartesSpec = new Set();
+  let mainTriee = [...main].sort((a, b) => a - b);
+  for (let c of mainTriee) {
+    for (let pile of pilesData) {
+      if (Math.abs(c - pile.value) === 10) cartesSpec.add(c);
+    }
+    for (let autre of mainTriee) {
+      if (c !== autre && Math.abs(c - autre) === 10) cartesSpec.add(c);
+    }
+  }
+
+  mainTriee.forEach(c => {
     const carte = document.createElement("div");
     carte.className = "carte";
     carte.innerText = c;
     carte.onclick = () => selectionnerCarte(c);
+    if (cartesSpec.has(c)) carte.style.backgroundColor = "#ffe066";
     if (c === carteSelectionnee) carte.classList.add("selected");
     mainDiv.appendChild(carte);
   });
   document.getElementById("info").innerText = `Joueur ${joueurActuelIndex + 1} - Cartes à jouer: ${cartesAJouerRestantes}`;
   document.getElementById("btnFinTour").disabled = cartesAJouerRestantes > 0;
+  document.getElementById("btnFinTour").onclick = finTour;
+  document.getElementById("btnFinTour").style.display = "";
 }
 function enableInteraction(active) {
   const mainDiv = document.getElementById("main");
@@ -236,11 +449,17 @@ async function poserCarteFirebase(pile) {
   let nouvellesMains = [...etatPartie.mains];
   nouvellesMains[mainIndex] = nouvelleMain;
   let nouveauxCartesAJouer = etatPartie.cartesAJouer - 1;
+
+  // Historique (synchrone pour tous)
+  let hist = etatPartie.historique || [];
+  hist.push(`Joueur ${mainIndex + 1} ➜ ${carte} sur pile ${pile.id} (${pile.type})`);
+
   await db.ref(`parties/${partieId}`).update({
     piles: nouvellesPiles,
     mains: nouvellesMains,
     deck: nouveauDeck,
-    cartesAJouer: nouveauxCartesAJouer
+    cartesAJouer: nouveauxCartesAJouer,
+    historique: hist
   });
   carteSelectionnee = null;
 }
@@ -262,29 +481,42 @@ async function finTour() {
   });
 }
 
+// =============== OPTIONS COMMUNES ================
 window.onload = () => {
   afficherMenuAccueil();
   document.getElementById("btnCreer").onclick = () => {
     const pseudoInput = document.getElementById("pseudo");
     const customIdInput = document.getElementById("customIdPartie");
     if (!pseudoInput.value.trim() || !customIdInput.value.trim()) return alert("Entrez un pseudo et un ID de partie");
+    modeSolo = false;
     creerPartie(pseudoInput.value.trim(), customIdInput.value.trim());
   };
   document.getElementById("btnRejoindre").onclick = () => {
     const pseudoInput = document.getElementById("pseudo");
     const idPartieInput = document.getElementById("idPartie");
     if (!pseudoInput.value.trim() || !idPartieInput.value.trim()) return alert("Entrez pseudo et ID partie");
+    modeSolo = false;
     rejoindrePartie(idPartieInput.value.trim(), pseudoInput.value.trim());
   };
-  document.getElementById("btnFinTour").onclick = finTour;
-  document.getElementById("btnPret").onclick = pretLobby;
-  document.getElementById("btnDemarrer").onclick = demarrerPartie;
-  document.getElementById("btnQuitterLobby").onclick = quitterLobby;
+  document.getElementById("btnSolo").onclick = ouvrirSoloModal;
+  document.getElementById("btnLancerSolo").onclick = lancerPartieSolo;
+
   document.getElementById("themeToggle").onchange = e => {
-    if (e.target.checked) {
-      document.body.classList.add("dark");
+    if (e.target.checked) document.body.classList.add("dark");
+    else document.body.classList.remove("dark");
+  };
+  document.getElementById("btnAide").onclick = () => {
+    alert(`OBJECTIF:\nJouez toutes les cartes (2-99) sur 4 piles.\n\nPILES:\n- 2 montantes (+): poser une carte plus grande\n- 2 descendantes (-): poser une carte plus petite\n\nREGLES:\n- Vous devez jouer au moins 3 cartes par tour.\n- Vous pouvez faire un saut de 10 en arrière.\n- Pioche automatique après pose si cartes dispo.\n- Les cartes avec un écart de 10 sont en jaune.\n\nVICTOIRE : toutes les cartes ont été jouées.`);
+  };
+  document.getElementById("btnHistorique").onclick = () => {
+    let hist = modeSolo ? solo.historique : (historiqueCartesJouees || []);
+    const modal = document.getElementById("historiqueModal");
+    const contenu = document.getElementById("historiqueContenu");
+    if (!hist || hist.length === 0) {
+      contenu.innerText = "Aucune action pour le moment.";
     } else {
-      document.body.classList.remove("dark");
+      contenu.innerText = hist.join("\n");
     }
+    modal.style.display = "flex";
   };
 };
