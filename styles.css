@@ -1,0 +1,105 @@
+body {
+  font-family: Arial;
+  background: #eee;
+  padding: 20px;
+  color: #000;
+}
+h1 {
+  text-align: center;
+}
+.zone {
+  display: flex;
+  justify-content: space-around;
+  flex-wrap: wrap;
+}
+.pile,
+.main,
+.zone-info {
+  margin: 10px;
+}
+.pile {
+  width: 120px;
+  height: 160px;
+  background: white;
+  border: 2px solid black;
+  text-align: center;
+  padding-top: 20px;
+  font-size: 24px;
+  user-select: none;
+  cursor: pointer;
+}
+.montante {
+  border-color: green;
+}
+.descendante {
+  border-color: red;
+}
+.main {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: 10px;
+  justify-content: flex-start;
+  padding: 10px;
+  background: #ddd;
+  border-radius: 10px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.carte {
+  width: 70px;
+  height: 100px;
+  background: white;
+  border: 1px solid black;
+  text-align: center;
+  line-height: 100px;
+  font-weight: bold;
+  font-size: 24px;
+  cursor: pointer;
+  transition: transform 0.2s ease;
+  user-select: none;
+}
+.carte.selected {
+  border: 2px solid blue;
+  transform: scale(1.1);
+}
+button {
+  margin: 10px 0;
+  padding: 10px;
+  cursor: pointer;
+}
+body.dark {
+  background: #222;
+  color: #eee;
+}
+body.dark .pile,
+body.dark .carte,
+body.dark .main {
+  background: #444;
+  border-color: #888;
+  color: #fff;
+}
+body.dark button {
+  background: #333;
+  color: #fff;
+}
+#setupModal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+#setupBox {
+  background: white;
+  padding: 30px;
+  border-radius: 10px;
+  text-align: center;
+  user-select: none;
+}
