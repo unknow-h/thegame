@@ -1,4 +1,3 @@
-// ---- Firebase config (replace by your own if needed) ----
 const firebaseConfig = {
   apiKey: "AIzaSyC67w7K6BqcNkBh4yeNd4OfgvjAw_neO4k",
   authDomain: "the-game-30e6d.firebaseapp.com",
@@ -12,10 +11,7 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
-// ---- Variables de jeu ----
 let partieId = null, pseudo = null, joueurs = {}, etatPartie = null, carteSelectionnee = null, cartesAJouer = 3;
-
-// ---- MENU & LOBBY ----
 
 function afficherMenuAccueil() {
   document.getElementById("menuAccueil").style.display = "block";
@@ -33,17 +29,25 @@ function cacherLobby() {
   document.getElementById("jeu").style.display = "block";
 }
 
-async function creerPartie(pseudoJoueur) {
-  const partiesRef = db.ref('parties');
-  const nouvellePartieRef = partiesRef.push();
-  partieId = nouvellePartieRef.key;
+async function creerPartie(pseudoJoueur, customId) {
+  if (!customId) {
+    alert("Veuillez choisir un ID de partie simple (ex: 123, abc)");
+    return;
+  }
+  const partieRef = db.ref('parties/' + customId);
+  const snapshot = await partieRef.get();
+  if (snapshot.exists()) {
+    alert("Cet ID est déjà utilisé, choisis-en un autre.");
+    return;
+  }
+  partieId = customId;
   const partieData = {
     joueurs: {
       [pseudoJoueur]: { prêt: false, isCreator: true, mainIndex: 0 }
     },
     etat: "attente"
   };
-  await nouvellePartieRef.set(partieData);
+  await partieRef.set(partieData);
   pseudo = pseudoJoueur;
   ecouterPartie();
   montrerLobby();
@@ -113,8 +117,6 @@ async function demarrerPartie() {
 }
 function quitterLobby() { window.location.reload(); }
 
-// ---- SYNCHRO TEMPS RÉEL ----
-
 function ecouterPartie() {
   const partieRef = db.ref(`parties/${partieId}`);
   partieRef.on('value', snapshot => {
@@ -135,8 +137,6 @@ function ecouterPartie() {
     }
   });
 }
-
-// ---- AFFICHAGE JEU ----
 
 function afficherListeJoueurs(joueurs) {
   const div = document.getElementById("listeJoueurs");
@@ -203,8 +203,6 @@ function enableInteraction(active) {
   }
 }
 
-// ---- LOGIQUE DU JEU ----
-
 function selectionnerCarte(c) {
   if (etatPartie.joueurActuel !== joueurs[pseudo].mainIndex) return;
   carteSelectionnee = carteSelectionnee === c ? null : c;
@@ -264,14 +262,13 @@ async function finTour() {
   });
 }
 
-// ---- UI EVENTS ----
-
 window.onload = () => {
   afficherMenuAccueil();
   document.getElementById("btnCreer").onclick = () => {
     const pseudoInput = document.getElementById("pseudo");
-    if (!pseudoInput.value.trim()) return alert("Entrez un pseudo");
-    creerPartie(pseudoInput.value.trim());
+    const customIdInput = document.getElementById("customIdPartie");
+    if (!pseudoInput.value.trim() || !customIdInput.value.trim()) return alert("Entrez un pseudo et un ID de partie");
+    creerPartie(pseudoInput.value.trim(), customIdInput.value.trim());
   };
   document.getElementById("btnRejoindre").onclick = () => {
     const pseudoInput = document.getElementById("pseudo");
