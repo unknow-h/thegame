@@ -1,495 +1,263 @@
-// --- Firebase Initialization ---
-// You NEED to replace 'YOUR_API_KEY', 'YOUR_PROJECT_ID', 'YOUR_APP_ID'
-// with your actual Firebase project configuration.
-const firebaseConfig = {
-    apiKey: "YOUR_API_KEY",
-    authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-    projectId: "YOUR_PROJECT_ID",
-    databaseURL: "https://YOUR_PROJECT_ID-default-rtdb.firebaseio.com",
-    appId: "YOUR_APP_ID"
-};
-
-// Initialize Firebase (only once)
-if (!firebase.apps.length) {
-    firebase.initializeApp(firebaseConfig);
-}
-const db = firebase.database();
-const { ref, set, get, child, update, onValue, push } = firebase.database; // Firebase Realtime Database methods
-
-// --- Game State Variables ---
-let partie = {
-    idPartie: null,
-    createur: null, // To identify the host
-    statut: 'en attente', // 'en attente', 'en cours', 'finie'
-    joueurs: {}, // Ex: { pseudo: { pseudo: 'nom', pret: false, main: [], estActif: false } }
-    piles: {
-        montante1: 1,
-        montante2: 1,
-        descendante1: 100,
-        descendante2: 100
-    },
-    cartesDansPioche: 0,
-    nombreTotalCartesDeck: 98,
-    deckActuel: [], // The actual shuffled deck
-    cartesJoueesCeTour: 0,
-    modeSolo: false,
-    nombreJoueursSolo: 1
-};
-
-// --- Utility Functions ---
-
-function genererDeck() {
-    const deck = [];
-    for (let i = 2; i <= 99; i++) {
-        deck.push(i);
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>The Game - Multi et Solo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #eee;
+      padding: 20px;
+      color: #000;
+      margin: 0;
     }
-    // Fisher-Yates shuffle
-    for (let i = deck.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [deck[i], deck[j]] = [deck[j], deck[i]];
+    h1 { text-align: center; }
+    .zone { display: flex; justify-content: space-around; flex-wrap: wrap; }
+    .pile, .main, .zone-info { margin: 10px; }
+    .pile {
+      width: 120px;
+      height: 160px;
+      background: white;
+      border: 2px solid black;
+      text-align: center;
+      padding-top: 20px;
+      font-size: 24px;
     }
-    return deck;
-}
-
-// --- UI Display Functions ---
-
-function afficherCartesRestantes() {
-    const cartesRestantesElem = document.getElementById('cartesRestantesPioche');
-    if (cartesRestantesElem) {
-        cartesRestantesElem.textContent = `Cartes restantes dans la pioche: ${partie.cartesDansPioche}`;
+    .montante { border-color: green; }
+    .descendante { border-color: red; }
+    .main {
+      display: flex;
+      flex-direction: row;
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      gap: 10px;
+      justify-content: flex-start;
+      padding: 10px;
+      background: #ddd;
+      border-radius: 10px;
+      width: 100%;
+      box-sizing: border-box;
     }
-}
-
-function showSection(id) {
-    document.getElementById('menuAccueil').style.display = 'none';
-    document.getElementById('zoneLobbyAll').style.display = 'none';
-    document.getElementById('lobby').style.display = 'none';
-    document.getElementById('jeu').style.display = 'none';
-    document.getElementById(id).style.display = 'block';
-}
-
-function showNotification(message) {
-    const notificationArea = document.getElementById('notificationArea');
-    const notification = document.createElement('div');
-    notification.classList.add('notification');
-    notification.textContent = message;
-    notificationArea.appendChild(notification);
-
-    notification.addEventListener('animationend', () => {
-        notification.remove();
-    });
-}
-
-function afficherJoueursLobby() {
-    const lobbyJoueursDiv = document.getElementById('lobbyJoueurs');
-    lobbyJoueursDiv.innerHTML = ''; // Clear previous content
-
-    if (partie.joueurs) {
-        for (const pseudo in partie.joueurs) {
-            const joueur = partie.joueurs[pseudo];
-            const p = document.createElement('p');
-            p.textContent = `${joueur.pseudo} ${joueur.pret ? ' (Prêt!)' : ' (Pas prêt)'}`;
-            lobbyJoueursDiv.appendChild(p);
-        }
+    .carte {
+      width: 70px;
+      height: 100px;
+      background: white;
+      border: 1px solid black;
+      text-align: center;
+      line-height: 100px;
+      font-weight: bold;
+      font-size: 24px;
+      cursor: pointer;
+      transition: transform 0.2s ease;
+      border-radius: 5px;
+      animation: pop-in 0.3s cubic-bezier(.5,-0.5,.5,1.5);
     }
-}
-
-function mettreAJourBoutonDemarrer() {
-    const btnDemarrer = document.getElementById('btnDemarrer');
-    const pseudoActuel = document.getElementById('pseudo').value;
-    const joueursArray = Object.values(partie.joueurs || {});
-    
-    const tousPrets = joueursArray.length > 0 && joueursArray.every(j => j.pret);
-    const assezDeJoueurs = joueursArray.length >= 2; // At least 2 players for multiplayer
-
-    // Only host sees the button, and only if all are ready and enough players
-    if (partie.createur === pseudoActuel && tousPrets && assezDeJoueurs) {
-        btnDemarrer.style.display = 'block';
-    } else {
-        btnDemarrer.style.display = 'none';
+    @keyframes pop-in {
+      0% { transform: scale(0.8); opacity: 0; }
+      100% { transform: scale(1); opacity: 1; }
     }
-}
-
-
-// --- Firebase Logic ---
-
-// Function to create a new game in Firebase
-async function creerPartieFirebase(pseudo, customId) {
-    const partieRef = customId ? ref(db, 'parties/' + customId) : push(ref(db, 'parties'));
-    const partieId = customId || partieRef.key;
-
-    try {
-        await set(partieRef, {
-            id: partieId,
-            createur: pseudo,
-            statut: 'en attente',
-            joueurs: {
-                [pseudo]: {
-                    pseudo: pseudo,
-                    pret: false,
-                    main: []
-                }
-            },
-            piles: { montante1: 1, montante2: 1, descendante1: 100, descendante2: 100 },
-            cartesDansPioche: 0, // Will be set when game starts
-            deckActuel: [] // Will be set when game starts
-        });
-        partie.idPartie = partieId;
-        partie.createur = pseudo; // Set creator for the current player
-        showNotification(`Partie créée! ID: ${partieId}`);
-        ecouterChangementsPartie(partieId); // Start listening for changes
-        showSection('lobby');
-    } catch (error) {
-        console.error("Erreur lors de la création de la partie:", error);
-        showNotification("Erreur lors de la création de la partie.");
+    .selected {
+      border: 2px solid blue;
+      transform: scale(1.1);
     }
-}
-
-// Function to join an existing game in Firebase
-async function rejoindrePartieFirebase(pseudo, idPartie) {
-    try {
-        const partieSnapshot = await get(child(ref(db, 'parties'), idPartie));
-        if (partieSnapshot.exists()) {
-            const data = partieSnapshot.val();
-            if (data.statut !== 'en attente') {
-                showNotification("Cette partie est déjà en cours ou terminée.");
-                return;
-            }
-            if (Object.keys(data.joueurs || {}).length >= 4) { // Max 4 players example
-                 showNotification("Cette partie est pleine.");
-                 return;
-            }
-            
-            const joueursRef = ref(db, `parties/${idPartie}/joueurs/${pseudo}`);
-            await set(joueursRef, {
-                pseudo: pseudo,
-                pret: false,
-                main: []
-            });
-            partie.idPartie = idPartie;
-            partie.createur = data.createur; // Sync creator from Firebase
-            showNotification(`Partie ${idPartie} rejointe!`);
-            ecouterChangementsPartie(idPartie); // Start listening for changes
-            showSection('lobby');
-        } else {
-            showNotification("La partie n'existe pas !");
-        }
-    } catch (error) {
-        console.error("Erreur lors de la jointure de la partie:", error);
-        showNotification("Erreur lors de la jointure de la partie.");
+    button { margin: 10px 0; padding: 10px; }
+    body.dark { background: #222; color: #eee; }
+    body.dark .pile, body.dark .carte, body.dark .main {
+      background: #444;
+      border-color: #888;
+      color: #fff;
     }
-}
-
-// Listener for real-time updates from Firebase for the current game
-function ecouterChangementsPartie(partieId) {
-    const partieRef = ref(db, 'parties/' + partieId);
-    onValue(partieRef, (snapshot) => {
-        const data = snapshot.val();
-        if (data) {
-            partie = { ...partie, ...data }; // Update local 'partie' state
-            afficherJoueursLobby(); // Update lobby UI
-            mettreAJourBoutonDemarrer(); // Update Start button visibility
-            afficherCartesRestantes(); // Update card count (for in-game view)
-
-            // Transition to game view if game status changes to 'en cours'
-            if (partie.statut === 'en cours' && document.getElementById('jeu').style.display === 'none') {
-                 showSection('jeu');
-                 // You might need to call a function here to draw the initial game state
-                 // e.g., dessinerPiles(), dessinerMainDuJoueur(partie.joueurs[document.getElementById('pseudo').value].main);
-            }
-        } else {
-            console.log("Partie introuvable ou supprimée.");
-            showNotification("La partie a été supprimée ou n'existe plus.");
-            showSection('menuAccueil'); // Go back to main menu
-        }
-    });
-}
-
-// --- Game Logic ---
-
-// This function should be called when a NEW game starts (after players are ready)
-function initialiserNouvellePartie(nombreDeJoueursReels) {
-    partie.deckActuel = genererDeck(); // Generate and shuffle a new deck
-
-    let cartesParJoueur;
-    if (nombreDeJoueursReels === 1) {
-        cartesParJoueur = 8;
-    } else if (nombreDeJoueursReels === 2) {
-        cartesParJoueur = 7;
-    } else { // 3 or 4 players (assuming max 4 for this version based on HTML)
-        cartesParJoueur = 6;
+    body.dark button { background: #333; color: #fff; }
+    #historiqueModal {
+      position:fixed; top:0; left:0; width:100vw; height:100vh;
+      background: rgba(0,0,0,0.8); color:#fff; overflow:auto; z-index: 2000;
+      align-items: center; justify-content: center;
+      display:none;
     }
-
-    // Distribute initial cards to players' hands
-    // This is a critical part you need to adapt to your player management.
-    // Loop through partie.joueurs and deal cards from partie.deckActuel
-    for (const pseudo in partie.joueurs) {
-        const mainJoueur = [];
-        for (let j = 0; j < cartesParJoueur; j++) {
-            if (partie.deckActuel.length > 0) {
-                mainJoueur.push(partie.deckActuel.shift());
-            }
-        }
-        partie.joueurs[pseudo].main = mainJoueur; // Assign hand to player
+    #historiqueModal .box {
+      background:#222; margin:50px auto; padding:20px;
+      max-width:400px; border-radius:10px; position:relative;
     }
-
-    // Calculate remaining cards in the deck after initial distribution
-    partie.cartesDansPioche = partie.nombreTotalCartesDeck - (nombreDeJoueursReels * cartesParJoueur);
-    afficherCartesRestantes();
-
-    // Reset piles (values are already set in partie.piles, just need to update UI)
-    // You'll need a function to draw these on screen, e.g., `dessinerPiles()`
-    // For now, let's just make sure the values are initialized in Firebase if the game starts.
-
-    partie.cartesJoueesCeTour = 0;
-    // Set the first active player, etc.
-}
-
-// Function to draw cards from the deck for a player's hand
-function piocherCartesPourMain(joueurPseudo, nombreDeCartesAPiocher) {
-    let cartesPiochees = [];
-    if (!partie.joueurs[joueurPseudo]) {
-        console.error(`Joueur ${joueurPseudo} non trouvé.`);
-        return [];
+    .carte-anim {
+      position: fixed;
+      width: 70px;
+      height: 100px;
+      background: white;
+      border: 1px solid black;
+      font-weight: bold;
+      font-size: 24px;
+      line-height: 100px;
+      text-align: center;
+      pointer-events: none;
+      transition: all 0.5s ease;
+      z-index: 2000;
+      border-radius: 5px;
     }
-
-    // Make sure the deck is synced with Firebase if it's a multiplayer game
-    if (!partie.modeSolo && partie.idPartie) {
-        // In a real multiplayer game, you'd fetch the deck from Firebase,
-        // draw cards, then update Firebase. For simplicity here, we assume partie.deckActuel is synced.
+    /* ------ Notifications visuelles ------ */
+    #notificationArea {
+      position: fixed;
+      top: 30px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 5000;
+      min-width: 200px;
+      pointer-events: none;
     }
-
-    for (let i = 0; i < nombreDeCartesAPiocher; i++) {
-        if (partie.deckActuel.length > 0) {
-            const cartePiochee = partie.deckActuel.shift();
-            cartesPiochees.push(cartePiochee);
-            partie.cartesDansPioche--;
-        } else {
-            console.log("La pioche est vide !");
-            showNotification("La pioche est vide!");
-            break;
-        }
+    .notification {
+      display: inline-block;
+      background: #3084c4;
+      color: #fff;
+      padding: 16px 32px;
+      border-radius: 8px;
+      box-shadow: 0 4px 16px #0003;
+      font-size: 1.1em;
+      opacity: 0;
+      animation: fadeInOut 4.5s linear;
+      margin-bottom: 8px;
     }
-
-    // Add drawn cards to the player's hand (local update)
-    partie.joueurs[joueurPseudo].main.push(...cartesPiochees);
-
-    // IMPORTANT: Update Firebase with the new deck, new card count, and updated player hand
-    if (partie.idPartie) { // Only update if it's a networked game
-        update(ref(db, 'parties/' + partie.idPartie), {
-            deckActuel: partie.deckActuel,
-            cartesDansPioche: partie.cartesDansPioche,
-            [`joueurs/${joueurPseudo}/main`]: partie.joueurs[joueurPseudo].main // Update specific player's hand
-        }).catch(error => console.error("Erreur mise à jour Firebase pioche:", error));
+    @keyframes fadeInOut {
+      0% { opacity: 0; }
+      10% { opacity: 1; }
+      90% { opacity: 1; }
+      100% { opacity: 0; }
     }
-
-    afficherCartesRestantes();
-    // You need a function to redraw the player's hand on the UI
-    // e.g., dessinerMainDuJoueur(partie.joueurs[joueurPseudo].main);
-    return cartesPiochees;
-}
-
-// --- Event Listeners ---
-
-document.addEventListener('DOMContentLoaded', () => {
-    const pseudoInput = document.getElementById('pseudo');
-    const customIdPartieInput = document.getElementById('customIdPartie');
-    const idPartieInput = document.getElementById('idPartie');
-    const themeToggle = document.getElementById('themeToggle');
-
-    // Load pseudo from localStorage if available
-    const savedPseudo = localStorage.getItem('pseudo');
-    if (savedPseudo) {
-        pseudoInput.value = savedPseudo;
+    /* ------ Responsive design ------ */
+    @media (max-width: 700px) {
+      h1 { font-size: 1.3em; }
+      .zone { flex-direction: column; align-items: center; }
+      .pile { width: 80vw; min-width: 100px; max-width: 98vw; height: 90px; font-size: 1.1em; margin: 8px 0; }
+      .main { flex-wrap: wrap; gap: 7px; padding: 4px; }
+      .carte { width: 55px; height: 76px; font-size: 1em; line-height: 76px; }
+      .zone-info { padding: 5px; }
+      button { width: 100%; font-size: 1em; margin: 8px 0; }
+      #setupBox, #soloModal > div, #historiqueModal .box {
+        width: 95vw !important; max-width: none !important; margin: 10px auto !important;
+        box-sizing: border-box;
+      }
+      #main { width: 100vw; max-width: 99vw; }
+      #menuAccueil, #lobby, #jeu { padding: 2vw; }
     }
-    pseudoInput.addEventListener('input', () => {
-        localStorage.setItem('pseudo', pseudoInput.value);
-    });
-
-    // Handle Create Game button
-    document.getElementById('btnCreer').addEventListener('click', async () => {
-        const pseudo = pseudoInput.value;
-        const customId = customIdPartieInput.value;
-        if (!pseudo) {
-            showNotification("Veuillez entrer un pseudo.");
-            return;
-        }
-        await creerPartieFirebase(pseudo, customId);
-    });
-
-    // Handle Join Game button
-    document.getElementById('btnRejoindre').addEventListener('click', async () => {
-        const pseudo = pseudoInput.value;
-        const idPartie = idPartieInput.value;
-        if (!pseudo || !idPartie) {
-            showNotification("Veuillez entrer un pseudo et l'ID de la partie.");
-            return;
-        }
-        await rejoindrePartieFirebase(pseudo, idPartie);
-    });
-
-    // Handle Solo Mode button
-    document.getElementById('btnSolo').addEventListener('click', () => {
-        document.getElementById('soloModal').style.display = 'flex';
-    });
-
-    // Handle Launch Solo Game button
-    document.getElementById('btnLancerSolo').addEventListener('click', () => {
-        const nbJoueursSolo = parseInt(document.getElementById('nbJoueurs').value);
-        if (isNaN(nbJoueursSolo) || nbJoueursSolo < 1 || nbJoueursSolo > 4) {
-            showNotification("Veuillez entrer un nombre de joueurs valide (1-4).");
-            return;
-        }
-        partie.modeSolo = true;
-        partie.nombreJoueursSolo = nbJoueursSolo;
-        partie.idPartie = 'solo-' + Date.now(); // Unique ID for solo game (not sent to Firebase)
-        partie.createur = pseudoInput.value || 'JoueurSolo'; // Set a pseudo for solo player
-        partie.joueurs = {
-            [partie.createur]: { pseudo: partie.createur, pret: true, main: [] }
-        };
-
-        document.getElementById('soloModal').style.display = 'none';
-        showSection('jeu');
-        initialiserNouvellePartie(nbJoueursSolo); // Use nbJoueursSolo for deck calculation
-        showNotification("Partie solo lancée!");
-        // You'll need to implement actual game start for solo here (drawing cards, enabling buttons etc.)
-        piocherCartesPourMain(partie.createur, 8); // Example: deal 8 cards to solo player
-        document.getElementById('btnFinTour').disabled = false; // Enable end turn for solo
-    });
-
-    // Handle "Je suis prêt!" button in lobby
-    document.getElementById('btnPret').addEventListener('click', async () => {
-        const currentPseudo = pseudoInput.value;
-        if (partie.idPartie && currentPseudo) {
-            const joueurPretRef = ref(db, `parties/${partie.idPartie}/joueurs/${currentPseudo}/pret`);
-            const estPretActuel = partie.joueurs[currentPseudo]?.pret || false;
-            await set(joueurPretRef, !estPretActuel)
-                .then(() => showNotification(`Vous êtes maintenant ${!estPretActuel ? 'Prêt!' : 'Pas prêt.'}`))
-                .catch(error => console.error("Erreur état prêt:", error));
-        }
-    });
-
-    // Handle "Démarrer la partie" button in lobby (only visible to host when players are ready)
-    document.getElementById('btnDemarrer').addEventListener('click', async () => {
-        if (partie.idPartie && partie.createur === pseudoInput.value) {
-            const nombreDeJoueursActifs = Object.keys(partie.joueurs).length;
-            
-            // Re-initialize for game start (generates deck, distributes hands, updates local count)
-            initialiserNouvellePartie(nombreDeJoueursActifs);
-
-            // Update Firebase with the new game state (deck, card count, player hands)
-            await update(ref(db, 'parties/' + partie.idPartie), {
-                statut: 'en cours',
-                deckActuel: partie.deckActuel,
-                cartesDansPioche: partie.cartesDansPioche,
-                joueurs: partie.joueurs // Update all player hands in Firebase
-            }).then(() => {
-                showNotification("La partie commence!");
-            }).catch(error => console.error("Erreur démarrage partie Firebase:", error));
-            
-            showSection('jeu'); // Switch to game view
-            document.getElementById('btnFinTour').disabled = false; // Enable end turn button
-        }
-    });
-
-    // Handle "Quitter la salle" button in lobby
-    document.getElementById('btnQuitterLobby').addEventListener('click', async () => {
-        if (partie.idPartie && pseudoInput.value) {
-            const currentPseudo = pseudoInput.value;
-            // Remove player from the party
-            await set(ref(db, `parties/${partie.idPartie}/joueurs/${currentPseudo}`), null)
-                .then(() => {
-                    showNotification("Vous avez quitté la partie.");
-                    showSection('menuAccueil');
-                    partie = { // Reset local state
-                        idPartie: null, createur: null, statut: 'en attente', joueurs: {},
-                        piles: { montante1: 1, montante2: 1, descendante1: 100, descendante2: 100 },
-                        cartesDansPioche: 0, nombreTotalCartesDeck: 98, deckActuel: [], cartesJoueesCeTour: 0,
-                        modeSolo: false, nombreJoueursSolo: 1
-                    };
-                })
-                .catch(error => console.error("Erreur quitter lobby:", error));
-        }
-    });
-
-    // Handle "Fin du tour" button
-    document.getElementById('btnFinTour').addEventListener('click', () => {
-        const currentPseudo = pseudoInput.value; // Assuming current player is this pseudo
-        const cardsToDraw = 2; // Example: player must draw 2 cards
-        piocherCartesPourMain(currentPseudo, cardsToDraw);
-        showNotification(`Vous avez pioché ${cardsToDraw} cartes.`);
-        // You'll need to implement logic to pass the turn to the next player
-    });
-
-    // Theme toggle
-    if (themeToggle) {
-        const savedTheme = localStorage.getItem('theme');
-        if (savedTheme === 'dark') {
-            document.body.classList.add('dark');
-            themeToggle.checked = true;
-        }
-        themeToggle.addEventListener('change', () => {
-            if (themeToggle.checked) {
-                document.body.classList.add('dark');
-                localStorage.setItem('theme', 'dark');
-            } else {
-                document.body.classList.remove('dark');
-                localStorage.setItem('theme', 'light');
-            }
-        });
+    @media (max-width: 400px) {
+      .pile { font-size: 0.9em; }
+      .carte { width: 36px; height: 54px; font-size: 0.9em; line-height: 54px; }
+      #main { gap: 3px; }
+      button { font-size: 0.85em; }
     }
+    /* --- Zone lobby visible --- */
+    #zoneLobbyAll {
+      margin: 20px auto;
+      background: #f0f4fa;
+      border-radius: 10px;
+      max-width: 500px;
+      box-shadow: 0 2px 10px #0001;
+      padding: 16px 22px;
+      display: none;
+    }
+    #zoneLobbyAll h2 {
+      margin-top: 0;
+    }
+    #listeLobbyParties {
+      margin-bottom: 12px;
+    }
+    #zoneLobbyAll button {
+      background: #3084c4;
+      color: #fff;
+      border: none;
+    }
+    #zoneLobbyAll button:hover {
+      background: #1d668f;
+    }
+    .lobby-entry {
+      margin: 5px 0;
+      padding: 7px 14px;
+      border-radius: 6px;
+      background: #e9f2fb;
+      border: 1px solid #3084c4;
+      font-size: 1em;
+      width: 100%;
+      text-align: left;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      transition: background 0.2s;
+    }
+    .lobby-entry:hover {
+      background: #c9e8fa;
+    }
+  </style>
+</head>
+<body>
+<div id="notificationArea"></div>
+<div id="historiqueModal">
+  <div class="box">
+    <h3>Historique des cartes jouées</h3>
+    <div id="historiqueContenu" style="max-height:300px; overflow-y:auto; white-space: pre-line;"></div>
+    <button onclick="document.getElementById('historiqueModal').style.display='none'" style="margin-top:10px;">Fermer</button>
+  </div>
+</div>
 
-    // Show the initial menu
-    showSection('menuAccueil');
+  <!-- Zone lobby global -->
+  <div id="zoneLobbyAll">
+    <h2>Liste des parties ouvertes</h2>
+    <div id="listeLobbyParties"></div>
+    <button id="btnCreerLobby">Créer une nouvelle partie</button>
+  </div>
 
-    // Initial check for existing game if user refreshed page (advanced, optional)
-    // You might want to try to rejoin based on localStorage partieId if available.
-});
+  <div id="menuAccueil">
+    <h2>Bienvenue dans The Game</h2>
+    <input type="text" id="pseudo" placeholder="Ton pseudo">
+    <input type="text" id="customIdPartie" placeholder="ID de la partie (ex: 123)">
+    <button id="btnCreer">Créer une partie</button>
+    <button id="btnSolo">Mode Solo</button>
+    <hr>
+    <input type="text" id="idPartie" placeholder="ID de la partie à rejoindre">
+    <button id="btnRejoindre">Rejoindre une partie</button>
+    <div id="menuMessage"></div>
+  </div>
 
+  <!-- Modal SOLO -->
+  <div id="soloModal" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background: rgba(0,0,0,0.8); z-index:999; align-items: center; justify-content: center;">
+    <div style="background: #fff; color:#000; padding:30px; border-radius:10px; text-align:center; margin: 10vw auto;">
+      <h2>Mode Solo</h2>
+      <label for="nbJoueurs">Nombre de joueurs humains :</label>
+      <input type="number" id="nbJoueurs" min="1" max="4" value="1"><br><br>
+      <button id="btnLancerSolo">Lancer la partie Solo</button>
+      <button onclick="document.getElementById('soloModal').style.display='none'" style="margin-left:20px;">Annuler</button>
+    </div>
+  </div>
 
-// --- Placeholder Game UI Update Functions (you will need to implement these fully) ---
+  <!-- Partie multijoueur -->
+  <div id="lobby" style="display:none;">
+    <h2>Lobby de la partie</h2>
+    <div id="lobbyJoueurs"></div>
+    <button id="btnPret">Je suis prêt !</button>
+    <button id="btnDemarrer" style="display:none;">Démarrer la partie</button>
+    <button id="btnQuitterLobby">Quitter la salle</button>
+    <div id="lobbyMessage"></div>
+  </div>
 
-// Function to draw the player's hand cards on the UI
-function dessinerMainDuJoueur(main) {
-    const mainDiv = document.getElementById('main');
-    mainDiv.innerHTML = ''; // Clear existing cards
-    main.sort((a, b) => a - b); // Keep hand sorted for better play
-    main.forEach(cardValue => {
-        const cardElem = document.createElement('div');
-        cardElem.classList.add('carte');
-        cardElem.textContent = cardValue;
-        // Add event listener for card clicks (select card)
-        // cardElem.addEventListener('click', () => selectCard(cardValue, cardElem));
-        mainDiv.appendChild(cardElem);
-    });
-}
+  <!-- Partie en cours (multi ou solo) -->
+  <div id="jeu" style="display:none;">
+    <h1>The Game</h1>
+    <label>
+      <input type="checkbox" id="themeToggle"> Mode sombre
+      <button id="btnAide">❓ Aide</button>
+      <button id="btnHistorique">📜 Historique</button>
+    </label>
+    <div id="info"></div>
+    <div class="zone" id="piles"></div>
+    <div class="zone-info">
+      <div id="main"></div>
+      <button id="btnFinTour" disabled>Fin du tour</button>
+    </div>
+    <div id="listeJoueurs"></div>
+    <div id="message"></div>
+  </div>
 
-// Function to draw the piles on the UI
-function dessinerPiles() {
-    const pilesDiv = document.getElementById('piles');
-    pilesDiv.innerHTML = ''; // Clear existing piles
-
-    // Example for one ascending and one descending pile
-    // You'll need to iterate through all four piles (montante1, montante2, descendante1, descendante2)
-    const pileMontante1 = document.createElement('div');
-    pileMontante1.classList.add('pile', 'montante');
-    pileMontante1.dataset.pileType = 'montante1';
-    pileMontante1.textContent = partie.piles.montante1;
-    // pileMontante1.addEventListener('click', () => placeCardOnPile('montante1'));
-    pilesDiv.appendChild(pileMontante1);
-
-    const pileDescendante1 = document.createElement('div');
-    pileDescendante1.classList.add('pile', 'descendante');
-    pileDescendante1.dataset.pileType = 'descendante1';
-    pileDescendante1.textContent = partie.piles.descendante1;
-    // pileDescendante1.addEventListener('click', () => placeCardOnPile('descendante1'));
-    pilesDiv.appendChild(pileDescendante1);
-
-    // Add remaining piles (montante2, descendante2) similarly
-}
-
-// You will also need:
-// - `selectCard(cardValue, cardElement)`: To handle selecting a card from hand.
-// - `placeCardOnPile(pileType)`: To handle placing a selected card on a pile.
-// - `checkWinCondition()` and `checkLoseCondition()`
-// - Full turn management (who's active, how many cards played per turn, etc.)
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
