@@ -13,13 +13,11 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
 let partieId = null, pseudo = null, joueurs = {}, etatPartie = null, carteSelectionnee = null;
-// La valeur initiale de cartesAJouer devrait être 3, mais elle est gérée par Firebase/Solo State
 let modeSolo = false;
 let historiqueCartesJouees = [];
 
 const PARTIE_TIMEOUT = 30 * 60 * 1000; // 30 min en ms
 
-// Stocke les références des listeners et intervalles pour les nettoyer
 window.firebasePartieListener = null;
 window.partieTimeoutInterval = null;
 
@@ -39,9 +37,8 @@ function afficherLobbyGlobal() {
     const zone = document.getElementById("zoneLobbyAll");
     const liste = document.getElementById("listeLobbyParties");
     if (!zone || !liste) return;
-    zone.style.display = "flex"; // Changed to flex to use CSS flex properties
+    zone.style.display = "flex";
     liste.innerHTML = "<i>Chargement...</i>";
-    // Important: Assurez-vous d'avoir ".indexOn": "etat" dans vos règles de sécurité Firebase
     db.ref('parties').orderByChild('etat').equalTo('attente').on('value', snap => {
         liste.innerHTML = "";
         let found = false;
@@ -69,7 +66,7 @@ function afficherLobbyGlobal() {
 // --- MODE SOLO LOCAL ---
 let solo = {
     deck: [],
-    joueurs: [], // main: [] pour chaque joueur
+    joueurs: [],
     piles: [],
     joueurActuel: 0,
     cartesAJouer: 3,
@@ -82,7 +79,7 @@ function afficherMenuAccueil() {
     document.getElementById("lobby").style.display = "none";
     document.getElementById("jeu").style.display = "none";
     const zoneLobby = document.getElementById("zoneLobbyAll");
-    if(zoneLobby) zoneLobby.style.display = "flex"; // Ensure it shows
+    if(zoneLobby) zoneLobby.style.display = "flex";
     afficherLobbyGlobal();
 }
 function montrerLobby() {
@@ -104,9 +101,7 @@ function lancerPartieSolo() {
     document.getElementById("soloModal").style.display = "none";
     document.getElementById("menuAccueil").style.display = "none";
     document.getElementById("jeu").style.display = "block";
-    // Config
     const nbHumains = Math.max(1, Math.min(4, parseInt(document.getElementById("nbJoueurs").value || "1")));
-    const nbBots = 4 - nbHumains; // Not directly used but good for clarity
     solo.deck = Array.from({ length: 98 }, (_, i) => i + 2).sort(() => Math.random() - 0.5);
     solo.piles = [
         { id: 1, type: 'montante', value: 1 },
@@ -130,7 +125,6 @@ function lancerPartieSolo() {
 }
 
 function updateAffichageSolo() {
-    // Règle 1: Compteur de cartes à piocher
     document.getElementById("info").innerText = `Joueur ${solo.joueurActuel + 1} (${solo.bots[solo.joueurActuel] ? 'Bot' : 'Humain'}) - Cartes à jouer: ${solo.cartesAJouer} | Deck: ${solo.deck.length} cartes`;
 
     const zonePiles = document.getElementById("piles");
@@ -147,7 +141,6 @@ function updateAffichageSolo() {
     main.className = "main";
     main.innerHTML = '';
 
-    // Surbrillance cartes "spéciales"
     const mainTriee = [...solo.joueurs[solo.joueurActuel].main].sort((a, b) => a - b);
     let cartesSpec = new Set();
     for (let c of mainTriee) {
@@ -169,28 +162,23 @@ function updateAffichageSolo() {
         main.appendChild(carte);
     });
 
-    document.getElementById("listeJoueurs").innerHTML = ""; // This should be populated by displayJoueursListSolo
-    // Temporarily disable this, it causes conflicts with afficherListeJoueurs in multi
-    // document.getElementById("message").innerHTML = ""; 
-
     document.getElementById("btnFinTour").onclick = finTourSolo;
     document.getElementById("btnFinTour").disabled = solo.cartesAJouer > 0;
     document.getElementById("btnFinTour").style.display = "";
 
-    // Afficher les joueurs dans le mode solo
     displayJoueursListSolo(solo.joueurs, solo.joueurActuel, solo.bots);
 
-    // Vérifie l'absence de coup possible
+    // Vérifie l'absence de coup possible seulement si le joueur a des cartes et ne peut plus piocher
     if (
         !solo.bots[solo.joueurActuel] &&
-        solo.joueurs[solo.joueurActuel].main.length > 0 &&
+        solo.joueurs[solo.joueurActuel].main.length > 0 && // S'il a des cartes
+        solo.deck.length === 0 && // ET qu'il n'y a plus de deck pour piocher
         aucunCoupPossible(solo.joueurs[solo.joueurActuel].main, solo.piles)
     ) {
         afficherGameOverSolo();
     }
 }
 
-// Helper for solo mode to show player hands count
 function displayJoueursListSolo(joueursSolo, joueurActuelIndex, botsStatus) {
     const div = document.getElementById("listeJoueurs");
     div.innerHTML = "<h3>Joueurs :</h3><ul>";
@@ -205,7 +193,6 @@ function displayJoueursListSolo(joueursSolo, joueurActuelIndex, botsStatus) {
     });
     div.innerHTML += "</ul>";
 }
-
 
 function selectionnerCarteSolo(c) {
     if (solo.bots[solo.joueurActuel]) return;
@@ -232,16 +219,15 @@ function jouerCarteSolo(pile, carte) {
     let main = solo.joueurs[solo.joueurActuel].main;
     main.splice(main.indexOf(carte), 1);
     solo.cartesAJouer--;
-    // Règle 3: Ne plus prendre en compte la pioche de cartes si le deck est vide
-    if (main.length === 0 && solo.deck.length === 0) {
-        // Condition de victoire : toutes les cartes sont jouées et le deck est vide.
-        setTimeout(() => alert("Victoire collective !"), 300);
-        document.getElementById("btnFinTour").disabled = true; // Disable "Fin de tour" button
-        enableInteraction(false); // Disable further interaction
-    } else if (main.length === 0 && solo.deck.length > 0) {
-        // Player played all cards, but there are still cards to draw.
-        // This case is handled in finTourSolo, where the player will draw back to 8 cards.
-        // For now, allow to end turn
+
+    // Vérifier la victoire immédiatement après avoir posé une carte
+    // Si la main du joueur est vide ET le deck est vide ET toutes les mains des autres joueurs sont vides
+    const toutesMainsVides = solo.joueurs.every(j => j.main.length === 0);
+    if (main.length === 0 && solo.deck.length === 0 && toutesMainsVides) {
+        setTimeout(() => alert("Victoire collective ! Toutes les cartes ont été jouées !"), 300);
+        document.getElementById("btnFinTour").disabled = true;
+        enableInteraction(false);
+        return true; // Stop here, game is won
     }
     return true;
 }
@@ -253,23 +239,30 @@ function finTourSolo() {
     }
 
     let main = solo.joueurs[solo.joueurActuel].main;
-    // Règle 2: Repiocher une main complète si la main est vide OU piocher pour revenir à 8 cartes
-    // Règle 3: Ne plus prendre en compte la pioche de cartes si le deck est vide
+
+    // Logique de pioche:
+    // 1. Si la main est vide ET qu'il reste des cartes dans le deck, piocher pour revenir à 8 cartes
     if (main.length === 0 && solo.deck.length > 0) {
-        // If the player played all 8 cards, and deck is not empty, draw 8 new cards
         while (main.length < 8 && solo.deck.length > 0) {
             main.push(solo.deck.pop());
         }
         showNotification("Nouvelle main de 8 cartes piochée !");
-    } else if (solo.deck.length > 0) {
-        // If player didn't play all cards, just draw back to 8
+    }
+    // 2. Si la main n'est pas vide ET qu'il reste des cartes dans le deck, piocher pour revenir à 8 cartes
+    else if (main.length > 0 && solo.deck.length > 0) {
         while (main.length < 8 && solo.deck.length > 0) {
             main.push(solo.deck.pop());
         }
-    } else if (solo.deck.length === 0 && main.length > 0 && aucunCoupPossible(main, solo.piles)) {
-        // If no more cards in deck, player has cards but can't play, it's game over
-        afficherGameOverSolo();
-        return; // Stop the turn here if game over
+    }
+    // 3. Si le deck est vide ET que le joueur ne peut plus faire de coups (après avoir potentiellement pioché 0 carte)
+    // C'est une condition de défaite (si toutes les cartes n'ont pas été jouées)
+    if (solo.deck.length === 0 && aucunCoupPossible(main, solo.piles)) {
+        // Vérifier si toutes les cartes ont été jouées pour éviter un "game over" sur une victoire
+        const toutesCartesJoueuses = solo.joueurs.every(j => j.main.length === 0) && solo.deck.length === 0;
+        if (!toutesCartesJoueuses) { // Si ce n'est pas une victoire, c'est une défaite
+            afficherGameOverSolo();
+            return; // Stop the turn here if game over
+        }
     }
 
 
@@ -294,44 +287,42 @@ function jouerBotSolo() {
     choix.sort((a, b) => a.ecart - b.ecart);
     let jouees = 0;
     function jouerUne() {
-        if (jouees >= 3 || choix.length === 0 || aucunCoupPossible(solo.joueurs[solo.joueurActuel].main, solo.piles)) {
+        // Condition de sortie pour le bot:
+        // - A joué 3 cartes
+        // - Plus de coups possibles avec la main actuelle
+        // - Plus de choix de cartes valides
+        if (jouees >= 3 || aucunCoupPossible(solo.joueurs[solo.joueurActuel].main, solo.piles) || choix.length === 0) {
             return finTourSolo();
         }
         let { carte, pile } = choix.shift();
 
-        // Animation (logic from previous version)
         const mainDiv = document.getElementById("main");
         const cartesDiv = Array.from(mainDiv.children);
         const indexCarte = solo.joueurs[solo.joueurActuel].main.indexOf(carte);
         if (indexCarte === -1) {
-            // Carte not found, might have been played by another bot or removed. Try next.
-            return jouerUne();
+            return jouerUne(); // Carte déjà jouée ou non trouvée, passer à la suivante
         }
 
         const carteElem = cartesDiv[indexCarte];
-        if (!carteElem) { // Should not happen if indexCarte is valid
+        if (!carteElem) {
             return jouerUne();
         }
         const rectCarte = carteElem.getBoundingClientRect();
 
-        // Trouver la position de la pile cible
         const pilesDiv = document.getElementById("piles");
         const pileDivs = Array.from(pilesDiv.children);
         const pileIndex = solo.piles.findIndex(p => p.id === pile.id);
         const pileElem = pileDivs[pileIndex];
         const rectPile = pileElem.getBoundingClientRect();
 
-        // Créer la carte animée
         const animCarte = document.createElement("div");
         animCarte.className = "carte-anim";
         animCarte.innerText = carte;
         document.body.appendChild(animCarte);
 
-        // Position initiale
         animCarte.style.left = rectCarte.left + "px";
         animCarte.style.top = rectCarte.top + "px";
-        animCarte.offsetWidth; // Trigger reflow for transition
-        // Position finale (au centre de la pile)
+        animCarte.offsetWidth;
         const leftFinal = rectPile.left + (rectPile.width - rectCarte.width) / 2;
         const topFinal = rectPile.top + (rectPile.height - rectCarte.height) / 2;
         animCarte.style.left = leftFinal + "px";
@@ -342,15 +333,13 @@ function jouerBotSolo() {
         animCarte.style.fontSize = "18px";
         animCarte.style.opacity = "0.7";
         animCarte.addEventListener("transitionend", () => {
-            if (jouerCarteSolo(pile, carte)) {
-                updateAffichageSolo();
+            if (jouerCarteSolo(pile, carte)) { // Note: jouerCarteSolo will updateAffichageSolo() if successful
                 jouees++;
                 animCarte.remove();
                 setTimeout(jouerUne, 300);
             } else {
-                // If play was invalid (due to race condition or pile changed), remove anim and try next
                 animCarte.remove();
-                setTimeout(jouerUne, 100); // Try again quickly
+                setTimeout(jouerUne, 100);
             }
         }, { once: true });
     }
@@ -462,7 +451,6 @@ async function rejoindrePartie(idPartie, pseudoJoueur) {
         const partieState = snapshot.val();
         console.log("DEBUG: État de la partie récupéré:", partieState.etat);
 
-        // Permettre la reconnexion à une partie "attente" ou "en_cours"
         if (partieState.etat !== "attente" && partieState.etat !== "en_cours") {
             console.error("DEBUG: La partie est dans un état non joignable:", partieState.etat);
             throw `La partie est dans un état non joignable: ${partieState.etat}.`;
@@ -471,7 +459,6 @@ async function rejoindrePartie(idPartie, pseudoJoueur) {
         console.log("DEBUG: Début de la transaction pour ajouter/confirmer le joueur...");
         await joueursRef.transaction(joueursData => {
             if (joueursData) {
-                // Si le joueur existe déjà, on ne fait rien dans la transaction (il est "reconnecté")
                 if (joueursData[pseudoJoueur]) {
                     console.log(`DEBUG: Pseudo '${pseudoJoueur}' déjà présent dans la partie. Confirmation.`);
                     return joueursData;
@@ -487,6 +474,7 @@ async function rejoindrePartie(idPartie, pseudoJoueur) {
                 joueursData[pseudoJoueur] = { prêt: false, isCreator: false, mainIndex };
             } else {
                 console.log("DEBUG: Initialisation du premier joueur de la partie.");
+                // This branch usually means the party is empty or was just created, assign mainIndex 0.
                 joueursData = { [pseudoJoueur]: { prêt: false, isCreator: false, mainIndex: 0 } };
             }
             return joueursData;
@@ -497,7 +485,6 @@ async function rejoindrePartie(idPartie, pseudoJoueur) {
         console.log("DEBUG: Appel de verifierSuppressionAuto()...");
         verifierSuppressionAuto();
 
-        // Gérer l'affichage immédiat en fonction de l'état de la partie
         if (partieState.etat === "attente") {
             console.log("DEBUG: Partie en attente, montrer lobby.");
             montrerLobby();
@@ -505,6 +492,10 @@ async function rejoindrePartie(idPartie, pseudoJoueur) {
         } else if (partieState.etat === "en_cours") {
             console.log("DEBUG: Partie en cours, cacher lobby et mettre à jour le jeu.");
             cacherLobby();
+            // Force an update to show current game state immediately
+            if (etatPartie) { // Make sure etatPartie is populated after ecouterPartie()
+                updateInterfaceAvecEtat();
+            }
         }
 
         localStorage.setItem('lastPartieId', idPartie);
@@ -552,23 +543,32 @@ async function demarrerPartie() {
     updateLastActive();
     let deck = Array.from({ length: 98 }, (_, i) => i + 2).sort(() => Math.random() - 0.5);
     const joueursList = Object.entries(etatPartie.joueurs);
-    const mainsInit = Array.from({length: 4}).fill([]);
+    const mainsInit = Array.from({length: 4}).fill(null); // Initialize with nulls to ensure array structure
+
+    // Assign initial hands to players based on their mainIndex
     joueursList.forEach(([,j]) => {
-        // Ensure mainIndex is a number
         if (typeof j.mainIndex === 'number' && j.mainIndex >= 0 && j.mainIndex < 4) {
             mainsInit[j.mainIndex] = deck.splice(0, 8);
         } else {
-            console.warn(`Invalid mainIndex for player ${j.pseudo}: ${j.mainIndex}. Assigning default.`);
-            // Assign to a default if mainIndex is bad, or handle error
-            // For now, let's just make sure it's an array if it's not.
-            if (!Array.isArray(mainsInit[0])) mainsInit[0] = [];
-            mainsInit[0] = deck.splice(0,8); // Fallback to first player
+            console.warn(`Invalid mainIndex for player: ${JSON.stringify(j)}. Assigning default to 0 if available.`);
+            // Fallback: If mainIndex is invalid, try to assign to the first available slot (index 0) if not taken
+            if (mainsInit[0] === null) {
+                mainsInit[0] = deck.splice(0, 8);
+                j.mainIndex = 0; // Attempt to correct in Firebase later if needed, or re-structure
+            } else {
+                console.error("Could not assign hand to player due to invalid mainIndex and index 0 taken.");
+                // This scenario means a critical error in player mainIndex assignment.
+            }
         }
     });
 
+    // Filter out nulls if some mainIndexes were not used, or if there are less than 4 players
+    const finalMains = mainsInit.filter(hand => hand !== null);
+
+
     await db.ref(`parties/${partieId}`).update({
         etat: "en_cours",
-        mains: mainsInit,
+        mains: finalMains, // Use finalMains which only contains actual hands
         deck: deck,
         piles: [
             { id: 1, type: 'montante', value: 1 },
@@ -576,14 +576,14 @@ async function demarrerPartie() {
             { id: 3, type: 'descendante', value: 100 },
             { id: 4, type: 'descendante', value: 100 }
         ],
-        joueurActuel: 0,
-        cartesAJouer: Math.min(3, mainsInit[0]?.length || 0),
+        // Ensure joueurActuel is a valid mainIndex from the active players
+        joueurActuel: joueursList[0]?.[1]?.mainIndex || 0,
+        cartesAJouer: Math.min(3, finalMains[0]?.length || 0),
         historique: [],
         lastActive: Date.now()
     });
 }
 
-// Fonction modifiée pour supprimer la partie si elle est vide et en attente
 async function quitterLobby() {
     console.log("DEBUG: Tentative de quitter le lobby.");
     if (!partieId || !pseudo) {
@@ -599,11 +599,9 @@ async function quitterLobby() {
         await joueurRef.remove();
         console.log(`DEBUG: Joueur '${pseudo}' retiré de la partie '${partieId}'.`);
 
-        // Vérifier si la partie est vide après le départ
         const joueursSnapshot = await db.ref(`parties/${partieId}/joueurs`).once('value');
         if (!joueursSnapshot.exists() || Object.keys(joueursSnapshot.val()).length === 0) {
             console.log(`DEBUG: Plus de joueurs dans la partie '${partieId}'. Vérification de l'état.`);
-            // Plus de joueurs, récupérer l'état actuel de la partie pour décider de la suppression
             const partieSnapshot = await db.ref(`parties/${partieId}`).once('value');
             const partieData = partieSnapshot.val();
 
@@ -625,14 +623,11 @@ async function quitterLobby() {
     } finally {
         localStorage.removeItem('lastPartieId');
         localStorage.removeItem('lastPseudo');
-        window.location.reload(); // Recharger la page pour un nettoyage complet de l'état
+        window.location.reload();
     }
 }
 
-
-// Bloc de suppression automatique (notification visuelle si expiration)
 function verifierSuppressionAuto() {
-    // Nettoie l'intervalle existant pour éviter les doublons
     if (window.partieTimeoutInterval) {
         clearInterval(window.partieTimeoutInterval);
     }
@@ -651,9 +646,7 @@ function verifierSuppressionAuto() {
     }, 60 * 1000);
 }
 
-// Bloc d'écoute de la partie (notification visuelle si suppression)
 function ecouterPartie() {
-    // Détache le listener précédent pour éviter les listeners multiples
     if (window.firebasePartieListener) {
         db.ref(`parties/${partieId}`).off('value', window.firebasePartieListener);
     }
@@ -667,7 +660,6 @@ function ecouterPartie() {
             showNotification("La partie a été supprimée ou expirée.");
             localStorage.removeItem('lastPartieId');
             localStorage.removeItem('lastPseudo');
-            // S'assurer de rediriger proprement si la partie n'existe plus et qu'on n'est pas déjà sur le menu
             if (document.getElementById("jeu").style.display !== "none" || document.getElementById("lobby").style.display !== "none") {
                 afficherMenuAccueil();
             }
@@ -677,7 +669,6 @@ function ecouterPartie() {
         joueurs = data.joueurs || {};
         historiqueCartesJouees = data.historique || [];
 
-        // Si le joueur actuel n'est plus dans la liste des joueurs de la partie
         if (pseudo && !joueurs[pseudo]) {
             showNotification("Vous avez été déconnecté de la partie.");
             localStorage.removeItem('lastPartieId');
@@ -700,8 +691,10 @@ function ecouterPartie() {
             cacherLobby();
             afficherMessage("Partie terminée !");
             enableInteraction(false);
-            localStorage.removeItem('lastPartieId');
-            localStorage.removeItem('lastPseudo');
+            // Don't remove localStorage items immediately here to allow "checkReconnect" to still offer
+            // to reconnect if user just refresh/rejoins for a game that just ended.
+            // localStorage.removeItem('lastPartieId');
+            // localStorage.removeItem('lastPseudo');
         }
     };
     partieRef.on('value', window.firebasePartieListener);
@@ -714,7 +707,8 @@ function afficherListeJoueurs(joueurs, mains, joueurActuel) {
 
     joueursTries.forEach(([nom, infos]) => {
         let mainIndex = infos.mainIndex;
-        let nbcartes = mains && mains[mainIndex] ? mains[mainIndex].length : "?";
+        // Check if mains[mainIndex] exists and is an array before getting length
+        let nbcartes = (mains && Array.isArray(mains[mainIndex])) ? mains[mainIndex].length : "?";
         div.innerHTML += `<li>
             ${nom}
             ${infos.isCreator ? "(créateur)" : ""}
@@ -733,15 +727,16 @@ function getNomJoueurParIndex(idx) {
     for (let nom in joueurs) {
         if (joueurs[nom].mainIndex === idx) return nom;
     }
-    return "Joueur " + (idx+1); // Fallback for solo mode or if player somehow leaves mid-game
+    // Fallback if player name is not found (e.g., disconnected, or bot equivalent)
+    return "Joueur " + (idx+1);
 }
 
 function updateInterfaceAvecEtat() {
     if (!etatPartie) return;
     const mainIndex = joueurs[pseudo]?.mainIndex;
 
-    console.log("DEBUG: updateInterfaceAvecEtat - mainIndex du joueur actuel:", mainIndex); // Added Debug Log
-    console.log("DEBUG: updateInterfaceAvecEtat - etatPartie.mains:", etatPartie.mains); // Added Debug Log
+    console.log("DEBUG: updateInterfaceAvecEtat - mainIndex du joueur actuel:", mainIndex);
+    console.log("DEBUG: updateInterfaceAvecEtat - etatPartie.mains:", etatPartie.mains);
 
     if (mainIndex === undefined || mainIndex === null) {
         console.error("DEBUG: updateInterfaceAvecEtat - mainIndex est undefined ou null pour le pseudo actuel.");
@@ -753,7 +748,6 @@ function updateInterfaceAvecEtat() {
         return;
     }
 
-    // Checking if etatPartie.mains is an array and mainDuJoueur is an array
     if (!etatPartie.mains || !Array.isArray(etatPartie.mains)) {
         console.error("DEBUG: updateInterfaceAvecEtat - etatPartie.mains n'est pas un tableau valide.", etatPartie.mains);
         showNotification("Erreur de données de jeu (mains). Reconnexion impossible.");
@@ -763,8 +757,9 @@ function updateInterfaceAvecEtat() {
         afficherLobbyGlobal();
         return;
     }
+
     const mainDuJoueur = etatPartie.mains[mainIndex];
-    console.log("DEBUG: updateInterfaceAvecEtat - Main du joueur courant:", mainDuJoueur); // Added Debug Log
+    console.log("DEBUG: updateInterfaceAvecEtat - Main du joueur courant:", mainDuJoueur);
     if (!Array.isArray(mainDuJoueur)) {
         console.error(`DEBUG: updateInterfaceAvecEtat - La main à l'index ${mainIndex} n'est pas un tableau.`, mainDuJoueur);
         showNotification("Erreur de données de jeu (main du joueur). Reconnexion impossible.");
@@ -775,14 +770,13 @@ function updateInterfaceAvecEtat() {
         return;
     }
 
-
     afficherListeJoueurs(joueurs, etatPartie.mains, etatPartie.joueurActuel);
     updateAffichagePartie(
         etatPartie.mains[mainIndex],
         etatPartie.piles,
         etatPartie.joueurActuel,
         etatPartie.cartesAJouer,
-        etatPartie.deck ? etatPartie.deck.length : 0 // Pass deck length for Règle 1
+        etatPartie.deck ? etatPartie.deck.length : 0
     );
     if (etatPartie.joueurActuel === mainIndex) {
         enableInteraction(true);
@@ -793,12 +787,11 @@ function updateInterfaceAvecEtat() {
     }
 }
 
-// Modified to include deckLength parameter for Règle 1
 function updateAffichagePartie(main, pilesData, joueurActuelIndex, cartesAJouerRestantes, deckLength) {
-    console.log("DEBUG: updateAffichagePartie - Reçu 'main':", main); // Added Debug Log
+    console.log("DEBUG: updateAffichagePartie - Reçu 'main':", main);
     if (!Array.isArray(main)) {
         console.error("ERREUR CRITIQUE: 'main' n'est pas un tableau dans updateAffichagePartie!", main);
-        return; // Arrêter l'exécution pour éviter l'erreur "not iterable"
+        return;
     }
 
     const zonePiles = document.getElementById("piles");
@@ -814,7 +807,6 @@ function updateAffichagePartie(main, pilesData, joueurActuelIndex, cartesAJouerR
     mainDiv.className = "main";
     mainDiv.innerHTML = '';
 
-    // Surbrillance cartes spéciales (écart de 10)
     let cartesSpec = new Set();
     let mainTriee = [...main].sort((a, b) => a - b);
     for (let c of mainTriee) {
@@ -835,7 +827,6 @@ function updateAffichagePartie(main, pilesData, joueurActuelIndex, cartesAJouerR
         if (c === carteSelectionnee) carte.classList.add("selected");
         mainDiv.appendChild(carte);
     });
-    // Règle 1: Compteur de cartes à piocher
     document.getElementById("info").innerText = `Joueur ${joueurActuelIndex + 1} - Cartes à jouer: ${cartesAJouerRestantes} | Deck: ${deckLength} cartes`;
 
     document.getElementById("btnFinTour").disabled = cartesAJouerRestantes > 0;
@@ -845,10 +836,16 @@ function updateAffichagePartie(main, pilesData, joueurActuelIndex, cartesAJouerR
     // Vérifie l'absence de coup possible pour le joueur courant
     if (
         etatPartie.joueurActuel === joueurs[pseudo]?.mainIndex &&
-        main.length > 0 &&
-        aucunCoupPossible(main, pilesData)
+        main.length > 0 && // Si le joueur a des cartes
+        (deckLength === 0 || // ET le deck est vide
+         (deckLength > 0 && aucunCoupPossible(main, pilesData) && main.length >= 8)) // OU il reste des cartes mais il ne peut pas piocher pour avoir plus d'options
+        && aucunCoupPossible(main, pilesData) // ET aucun coup n'est possible avec la main actuelle
     ) {
-        afficherGameOverMulti();
+        // Only trigger game over if it's not already a victory condition
+        const toutesCartesJoueuses = Object.values(etatPartie.mains).every(m => m.length === 0) && etatPartie.deck.length === 0;
+        if (!toutesCartesJoueuses) {
+             afficherGameOverMulti();
+        }
     }
 }
 
@@ -873,7 +870,7 @@ function selectionnerCarte(c) {
         etatPartie.piles,
         etatPartie.joueurActuel,
         etatPartie.cartesAJouer,
-        etatPartie.deck ? etatPartie.deck.length : 0 // Pass deck length for Règle 1
+        etatPartie.deck ? etatPartie.deck.length : 0
     );
 }
 
@@ -900,27 +897,28 @@ async function poserCarteFirebase(pile) {
     let hist = etatPartie.historique || [];
     hist.push(`Joueur ${mainIndex + 1} ➜ ${carte} sur pile ${pile.id} (${pile.type})`);
 
-    // Règle 3: Vérifier si le jeu est terminé ici aussi si la main est vide et le deck est vide
-    if (nouvelleMain.length === 0 && (etatPartie.deck ? etatPartie.deck.length : 0) === 0) {
+    // Vérifier la condition de victoire ici aussi, de manière plus complète
+    const deckLength = etatPartie.deck ? etatPartie.deck.length : 0;
+    const toutesMainsVides = nouvellesMains.every(m => m.length === 0);
+
+    if (nouvelleMain.length === 0 && deckLength === 0 && toutesMainsVides) {
         hist.push("VICTOIRE COLLECTIVE ! Toutes les cartes ont été jouées.");
         await db.ref(`parties/${partieId}`).update({
-            etat: "terminee", // Set game state to finished
+            etat: "terminee",
             piles: nouvellesPiles,
             mains: nouvellesMains,
             historique: hist,
             lastActive: Date.now(),
-            // No need to update deck or cartesAJouer as game is over
         });
         showNotification("Victoire collective !");
         carteSelectionnee = null;
-        return; // Exit function, game is over
+        return;
     }
-
 
     await db.ref(`parties/${partieId}`).update({
         piles: nouvellesPiles,
         mains: nouvellesMains,
-        deck: etatPartie.deck,
+        deck: etatPartie.deck, // Keep existing deck for now, it's modified only at finTour
         cartesAJouer: nouveauxCartesAJouer,
         historique: hist,
         lastActive: Date.now()
@@ -939,47 +937,68 @@ async function finTour() {
     const mainIndex = joueurs[pseudo].mainIndex;
     let main = [...mains[mainIndex]];
 
-    // Règle 2: Repiocher une main complète si la main est vide OU piocher pour revenir à 8 cartes
-    // Règle 3: Ne plus prendre en compte la pioche de cartes si le deck est vide
+    // Logique de pioche (similaire à solo):
+    // 1. Si la main est vide ET qu'il reste des cartes dans le deck, piocher pour revenir à 8 cartes
     if (main.length === 0 && deck.length > 0) {
-        // If the player played all 8 cards, and deck is not empty, draw 8 new cards
         while (main.length < 8 && deck.length > 0) {
             main.push(deck.pop());
         }
         showNotification("Nouvelle main de 8 cartes piochée !");
-    } else if (deck.length > 0) {
-        // If player didn't play all cards, just draw back to 8
+    }
+    // 2. Si la main n'est pas vide ET qu'il reste des cartes dans le deck, piocher pour revenir à 8 cartes
+    else if (main.length > 0 && deck.length > 0) {
         while (main.length < 8 && deck.length > 0) {
             main.push(deck.pop());
         }
-    } else if (deck.length === 0 && main.length > 0 && aucunCoupPossible(main, etatPartie.piles)) {
-        // If no more cards in deck, player has cards but can't play, it's game over
-        afficherGameOverMulti();
-        return; // Stop the turn here if game over
     }
 
     mains[mainIndex] = main; // Update the main in the local array
 
-    let joueurCount = Object.keys(joueurs).length;
-    let nouveauJoueur = (etatPartie.joueurActuel + 1) % joueurCount;
+    // Vérification de fin de partie (Défaite) APRÈS la pioche
+    // Si le deck est vide ET que le joueur ne peut plus faire de coups avec sa main APRES pioche
+    // C'est une condition de défaite (si toutes les cartes n'ont pas été jouées)
+    if (deck.length === 0 && aucunCoupPossible(main, etatPartie.piles)) {
+        const toutesCartesJoueuses = mains.every(m => m.length === 0) && deck.length === 0;
+        if (!toutesCartesJoueuses) { // Si ce n'est pas une victoire, c'est une défaite
+            // Mettre à jour l'état avant d'afficher le Game Over
+            await db.ref(`parties/${partieId}`).update({
+                etat: "terminee",
+                mains: mains, // Important de sauvegarder la main vide ou bloquée
+                deck: deck,
+                lastActive: Date.now()
+            });
+            afficherGameOverMulti();
+            return; // Stop the turn here if game over
+        }
+    }
 
-    // This logic ensures the next player is an active player, skipping disconnected ones
+
+    let joueurCount = Object.keys(joueurs).length;
+    // Trier les joueurs par mainIndex pour garantir un ordre de tour stable
     const joueursActifsIndexes = Object.values(joueurs).map(j => j.mainIndex).sort((a,b)=>a-b);
-    let startIndex = nouveauJoueur;
-    let foundNext = false;
-    for (let i = 0; i < joueurCount; i++) {
-        const currentIndex = (startIndex + i) % joueurCount;
-        if (joueursActifsIndexes.includes(currentIndex)) {
-            nouveauJoueur = currentIndex;
-            foundNext = true;
+
+    let nouveauJoueurIndex = (etatPartie.joueurActuel + 1) % 4; // Start check from current player's next index
+    let nextActivePlayerMainIndex = -1;
+
+    // Find the next active player in the sorted list of mainIndexes
+    for (let i = 0; i < joueursActifsIndexes.length; i++) {
+        if (joueursActifsIndexes[i] === etatPartie.joueurActuel) {
+            // Found current player, next one in the sorted list is the actual next player
+            if (i + 1 < joueursActifsIndexes.length) {
+                nextActivePlayerMainIndex = joueursActifsIndexes[i + 1];
+            } else {
+                // Wrap around to the first player in the sorted list
+                nextActivePlayerMainIndex = joueursActifsIndexes[0];
+            }
             break;
         }
     }
-    if (!foundNext && joueursActifsIndexes.length > 0) {
-        // Fallback: If for some reason the loop fails, just pick the first active player
-        nouveauJoueur = joueursActifsIndexes[0];
+
+    // Fallback in case current player not found (shouldn't happen with proper connection)
+    if (nextActivePlayerMainIndex === -1 && joueursActifsIndexes.length > 0) {
+        nextActivePlayerMainIndex = joueursActifsIndexes[0];
     } else if (joueursActifsIndexes.length === 0) {
-        // No active players left, game should probably end or handle gracefully
+        // No active players left, game should terminate
         showNotification("Plus aucun joueur actif. La partie est terminée.");
         await db.ref(`parties/${partieId}`).update({
             etat: "terminee",
@@ -992,8 +1011,9 @@ async function finTour() {
     await db.ref(`parties/${partieId}`).update({
         mains: mains,
         deck: deck,
-        joueurActuel: nouveauJoueur,
-        cartesAJouer: Math.min(3, mains[nouveauJoueur]?.length || 0),
+        joueurActuel: nextActivePlayerMainIndex, // Use the determined next active player
+        cartesAJouer: Math.min(3, mains[nextActivePlayerMainIndex]?.length || 0),
+        historique: etatPartie.historique, // Ensure history is passed
         lastActive: Date.now()
     });
 }
