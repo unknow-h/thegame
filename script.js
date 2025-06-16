@@ -1,6 +1,6 @@
 // --- MULTIJOUEUR FIREBASE ---
 const firebaseConfig = {
-    apiKey: "AIzaSyC67w7K6BqcNkBh4yeNd4OfgvjAw_neO4k",
+    apiKey: "AIzaSyC67w7K6BqcNkBh4yeNd0OfgvjAw_neO4k",
     authDomain: "the-game-30e6d.firebaseapp.com",
     databaseURL: "https://the-game-30e6d-default-rtdb.firebaseio.com",
     projectId: "the-game-30e6d",
@@ -218,12 +218,20 @@ function jouerCarteSolo(pile, carte) {
     solo.historique.push(`Joueur ${solo.joueurActuel + 1} ➜ ${carte} sur pile ${pile.id} (${pile.type})`);
     let main = solo.joueurs[solo.joueurActuel].main;
     main.splice(main.indexOf(carte), 1);
+
+    // *** MODIFICATION POUR GESTION MAIN VIDE ***
+    // S'assurer que la main est un tableau vide si elle n'a plus d'éléments
+    if (!main || main.length === 0) {
+        solo.joueurs[solo.joueurActuel].main = [];
+    }
+    // *** FIN MODIFICATION ***
+
     solo.cartesAJouer--;
 
     // Vérifier la victoire immédiatement après avoir posé une carte
     // Si la main du joueur est vide ET le deck est vide ET toutes les mains des autres joueurs sont vides
     const toutesMainsVides = solo.joueurs.every(j => j.main.length === 0);
-    if (main.length === 0 && solo.deck.length === 0 && toutesMainsVides) {
+    if (solo.joueurs[solo.joueurActuel].main.length === 0 && solo.deck.length === 0 && toutesMainsVides) {
         setTimeout(() => alert("Victoire collective ! Toutes les cartes ont été jouées !"), 300);
         document.getElementById("btnFinTour").disabled = true;
         enableInteraction(false);
@@ -254,9 +262,17 @@ function finTourSolo() {
             main.push(solo.deck.pop());
         }
     }
+
+    // *** MODIFICATION POUR GESTION MAIN VIDE ***
+    // S'assurer que la main est un tableau vide si elle n'a plus d'éléments après pioche (si deck vide)
+    if (!main || main.length === 0) {
+        solo.joueurs[solo.joueurActuel].main = [];
+    }
+    // *** FIN MODIFICATION ***
+
     // 3. Si le deck est vide ET que le joueur ne peut plus faire de coups (après avoir potentiellement pioché 0 carte)
     // C'est une condition de défaite (si toutes les cartes n'ont pas été jouées)
-    if (solo.deck.length === 0 && aucunCoupPossible(main, solo.piles)) {
+    if (solo.deck.length === 0 && aucunCoupPossible(solo.joueurs[solo.joueurActuel].main, solo.piles)) {
         // Vérifier si toutes les cartes ont été jouées pour éviter un "game over" sur une victoire
         const toutesCartesJoueuses = solo.joueurs.every(j => j.main.length === 0) && solo.deck.length === 0;
         if (!toutesCartesJoueuses) { // Si ce n'est pas une victoire, c'est une défaite
@@ -543,32 +559,29 @@ async function demarrerPartie() {
     updateLastActive();
     let deck = Array.from({ length: 98 }, (_, i) => i + 2).sort(() => Math.random() - 0.5);
     const joueursList = Object.entries(etatPartie.joueurs);
-    const mainsInit = Array.from({length: 4}).fill(null); // Initialize with nulls to ensure array structure
+
+    // *** MODIFICATION POUR GESTION MAIN VIDE ***
+    // Initialize with empty arrays, not nulls, to ensure structure and prevent 'undefined' issues
+    const mainsInit = Array.from({length: 4}).map(() => []); // IMPORTANT CHANGE HERE: .map(() => [])
+    // *** FIN MODIFICATION ***
 
     // Assign initial hands to players based on their mainIndex
-    joueursList.forEach(([,j]) => {
+    joueursList.forEach(([nom,j]) => { // Added 'nom' for debugging if needed
         if (typeof j.mainIndex === 'number' && j.mainIndex >= 0 && j.mainIndex < 4) {
             mainsInit[j.mainIndex] = deck.splice(0, 8);
         } else {
-            console.warn(`Invalid mainIndex for player: ${JSON.stringify(j)}. Assigning default to 0 if available.`);
-            // Fallback: If mainIndex is invalid, try to assign to the first available slot (index 0) if not taken
-            if (mainsInit[0] === null) {
-                mainsInit[0] = deck.splice(0, 8);
-                j.mainIndex = 0; // Attempt to correct in Firebase later if needed, or re-structure
-            } else {
-                console.error("Could not assign hand to player due to invalid mainIndex and index 0 taken.");
-                // This scenario means a critical error in player mainIndex assignment.
-            }
+            console.warn(`Invalid mainIndex for player ${nom}: ${JSON.stringify(j)}. This player might not get a hand initially.`);
+            // No fallback here for invalid index; assume mainIndex will be correct or player is just an observer.
+            // If mainIndex can be missing, consider assigning a random one here for game stability, but it implies a design flaw.
         }
     });
 
-    // Filter out nulls if some mainIndexes were not used, or if there are less than 4 players
-    const finalMains = mainsInit.filter(hand => hand !== null);
-
+    // We no longer need to filter for nulls as mainsInit already contains empty arrays
+    // const finalMains = mainsInit.filter(hand => hand !== null); // REMOVE THIS LINE from previous suggestion
 
     await db.ref(`parties/${partieId}`).update({
         etat: "en_cours",
-        mains: finalMains, // Use finalMains which only contains actual hands
+        mains: mainsInit, // Use mainsInit directly
         deck: deck,
         piles: [
             { id: 1, type: 'montante', value: 1 },
@@ -578,7 +591,7 @@ async function demarrerPartie() {
         ],
         // Ensure joueurActuel is a valid mainIndex from the active players
         joueurActuel: joueursList[0]?.[1]?.mainIndex || 0,
-        cartesAJouer: Math.min(3, finalMains[0]?.length || 0),
+        cartesAJouer: Math.min(3, mainsInit[joueursList[0]?.[1]?.mainIndex || 0]?.length || 0), // Use mainsInit
         historique: [],
         lastActive: Date.now()
     });
@@ -890,6 +903,14 @@ async function poserCarteFirebase(pile) {
     nouvellesPiles = nouvellesPiles.map(p => p.id === pile.id ? {...p, value: carte} : p);
     let nouvelleMain = [...main];
     nouvelleMain.splice(nouvelleMain.indexOf(carte),1);
+
+    // *** MODIFICATION POUR GESTION MAIN VIDE ***
+    // S'assurer que nouvelleMain est un tableau, même s'il est vide
+    if (!nouvelleMain || nouvelleMain.length === 0) {
+        nouvelleMain = []; // S'assurer que c'est un tableau vide et non undefined/null
+    }
+    // *** FIN MODIFICATION ***
+
     let nouvellesMains = [...etatPartie.mains];
     nouvellesMains[mainIndex] = nouvelleMain;
     let nouveauxCartesAJouer = etatPartie.cartesAJouer - 1;
@@ -952,12 +973,19 @@ async function finTour() {
         }
     }
 
+    // *** MODIFICATION POUR GESTION MAIN VIDE ***
+    // S'assurer que la main mise à jour est un tableau, même si elle est vide après pioche (si deck vide)
+    if (!main || main.length === 0) {
+        main = []; // S'assurer que c'est un tableau vide
+    }
+    // *** FIN MODIFICATION ***
+    
     mains[mainIndex] = main; // Update the main in the local array
 
     // Vérification de fin de partie (Défaite) APRÈS la pioche
     // Si le deck est vide ET que le joueur ne peut plus faire de coups avec sa main APRES pioche
     // C'est une condition de défaite (si toutes les cartes n'ont pas été jouées)
-    if (deck.length === 0 && aucunCoupPossible(main, etatPartie.piles)) {
+    if (deck.length === 0 && aucunCoupPossible(mains[mainIndex], etatPartie.piles)) { // Use mains[mainIndex]
         const toutesCartesJoueuses = mains.every(m => m.length === 0) && deck.length === 0;
         if (!toutesCartesJoueuses) { // Si ce n'est pas une victoire, c'est une défaite
             // Mettre à jour l'état avant d'afficher le Game Over
@@ -965,7 +993,7 @@ async function finTour() {
                 etat: "terminee",
                 mains: mains, // Important de sauvegarder la main vide ou bloquée
                 deck: deck,
-                lastActive: Date.now()
+                lastActive: Date.24, 2025 at 9:45:03 PM EDT
             });
             afficherGameOverMulti();
             return; // Stop the turn here if game over
