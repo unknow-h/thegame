@@ -560,28 +560,35 @@ async function demarrerPartie() {
     let deck = Array.from({ length: 98 }, (_, i) => i + 2).sort(() => Math.random() - 0.5);
     const joueursList = Object.entries(etatPartie.joueurs);
 
-    // *** MODIFICATION POUR GESTION MAIN VIDE ***
-    // Initialize with empty arrays, not nulls, to ensure structure and prevent 'undefined' issues
-    const mainsInit = Array.from({length: 4}).map(() => []); // IMPORTANT CHANGE HERE: .map(() => [])
-    // *** FIN MODIFICATION ***
+    // Initialisation des mains avec des tableaux vides pour chaque index possible (0 à 3)
+    const mainsInit = Array.from({ length: 4 }).map(() => []);
 
     // Assign initial hands to players based on their mainIndex
-    joueursList.forEach(([nom,j]) => { // Added 'nom' for debugging if needed
+    joueursList.forEach(([nom, j]) => {
         if (typeof j.mainIndex === 'number' && j.mainIndex >= 0 && j.mainIndex < 4) {
             mainsInit[j.mainIndex] = deck.splice(0, 8);
         } else {
             console.warn(`Invalid mainIndex for player ${nom}: ${JSON.stringify(j)}. This player might not get a hand initially.`);
-            // No fallback here for invalid index; assume mainIndex will be correct or player is just an observer.
-            // If mainIndex can be missing, consider assigning a random one here for game stability, but it implies a design flaw.
         }
     });
 
-    // We no longer need to filter for nulls as mainsInit already contains empty arrays
-    // const finalMains = mainsInit.filter(hand => hand !== null); // REMOVE THIS LINE from previous suggestion
+    // Déterminer le premier joueur.
+    // Trie les joueurs par mainIndex pour s'assurer que le premier à jouer est bien celui avec l'index le plus bas.
+    const joueursTries = [...joueursList].sort((a, b) => a[1].mainIndex - b[1].mainIndex);
+
+    let premierJoueurMainIndex = 0; // Valeur par défaut
+    if (joueursTries.length > 0 && typeof joueursTries[0][1]?.mainIndex === 'number') {
+        premierJoueurMainIndex = joueursTries[0][1].mainIndex;
+    } else {
+        console.error("Erreur: Impossible de déterminer le premier joueur. La liste des joueurs est vide ou le mainIndex est invalide.");
+        // Gérer l'erreur : si aucun joueur valide n'est trouvé, la partie ne devrait pas démarrer
+        // Ou vous pouvez choisir de quitter la fonction ou d'afficher un message d'erreur à l'utilisateur.
+        // Pour l'instant, on laisse premierJoueurMainIndex à 0 comme fallback, mais c'est un point d'attention.
+    }
 
     await db.ref(`parties/${partieId}`).update({
         etat: "en_cours",
-        mains: mainsInit, // Use mainsInit directly
+        mains: mainsInit,
         deck: deck,
         piles: [
             { id: 1, type: 'montante', value: 1 },
@@ -589,9 +596,8 @@ async function demarrerPartie() {
             { id: 3, type: 'descendante', value: 100 },
             { id: 4, type: 'descendante', value: 100 }
         ],
-        // Ensure joueurActuel is a valid mainIndex from the active players
-        joueurActuel: joueursList[0]?.[1]?.mainIndex || 0,
-        cartesAJouer: Math.min(3, mainsInit[joueursList[0]?.[1]?.mainIndex || 0]?.length || 0), // Use mainsInit
+        joueurActuel: premierJoueurMainIndex, // Utilisation du premier joueur déterminé
+        cartesAJouer: Math.min(3, mainsInit[premierJoueurMainIndex]?.length || 0),
         historique: [],
         lastActive: Date.now()
     });
