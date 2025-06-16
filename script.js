@@ -123,7 +123,7 @@ function lancerPartieSolo() {
   if (solo.bots[solo.joueurActuel]) jouerBotSolo();
 }
 function updateAffichageSolo() {
-  document.getElementById("info").innerText = `Joueur ${solo.joueurActuel + 1} (${solo.bots[solo.joueurActuel] ? 'Bot' : 'Humain'}) - Cartes à jouer: ${solo.cartesAJouer}`;
+  document.getElementById("info").innerText = `Joueur <span class="math-inline">\{solo\.joueurActuel \+ 1\} \(</span>{solo.bots[solo.joueurActuel] ? 'Bot' : 'Humain'}) - Cartes à jouer: ${solo.cartesAJouer} - Deck: ${solo.deck.length} cartes`;
   const zonePiles = document.getElementById("piles");
   zonePiles.innerHTML = '';
   solo.piles.forEach(pile => {
@@ -205,19 +205,36 @@ function jouerCarteSolo(pile, carte) {
   return true;
 }
 function finTourSolo() {
-  if (solo.cartesAJouer > 0) return;
+    if (solo.cartesAJouer > 0) return;
 
-  // Piocher pour revenir à 8 cartes (ou moins si pioche vide)
-  let main = solo.joueurs[solo.joueurActuel].main;
-  while (main.length < 8 && solo.deck.length > 0) {
-    main.push(solo.deck.pop());
-  }
+    let main = solo.joueurs[solo.joueurActuel].main;
+    // Vérification de la main vide pour le bonus
+    const mainVideAvantPioche = main.length === 0;
 
-  solo.joueurActuel = (solo.joueurActuel + 1) % 4;
-  solo.cartesAJouer = Math.min(3, solo.joueurs[solo.joueurActuel].main.length);
-  carteSelectionnee = null;
-  updateAffichageSolo();
-  if (solo.bots[solo.joueurActuel]) jouerBotSolo();
+    // Piocher pour revenir à 8 cartes (ou moins si pioche vide)
+    while (main.length < 8 && solo.deck.length > 0) {
+        main.push(solo.deck.pop());
+    }
+
+    // Si la main était vide avant la pioche et qu'on a pioché des cartes,
+    // on donne des cartes à jouer supplémentaires (bonus)
+    if (mainVideAvantPioche && main.length > 0) {
+        solo.cartesAJouer = Math.min(3, main.length) + 3; // +3 cartes à jouer en bonus
+        showNotification("Bonus ! Vous avez vidé votre main, +3 cartes à jouer ce tour !");
+    } else {
+        solo.cartesAJouer = Math.min(3, main.length);
+    }
+
+    // Vérification de la condition de victoire après la pioche bonus
+    if (main.length === 0 && solo.deck.length === 0) {
+        setTimeout(() => alert("Victoire collective !"), 300);
+        return; // Fin de partie, ne pas passer au joueur suivant
+    }
+
+    solo.joueurActuel = (solo.joueurActuel + 1) % 4;
+    carteSelectionnee = null;
+    updateAffichageSolo();
+    if (solo.bots[solo.joueurActuel]) jouerBotSolo();
 }
 function jouerBotSolo() {
   let main = solo.joueurs[solo.joueurActuel].main;
@@ -722,7 +739,7 @@ function updateAffichagePartie(main, pilesData, joueurActuelIndex, cartesAJouerR
     if (c === carteSelectionnee) carte.classList.add("selected");
     mainDiv.appendChild(carte);
   });
-  document.getElementById("info").innerText = `Joueur ${joueurActuelIndex + 1} - Cartes à jouer: ${cartesAJouerRestantes}`;
+  document.getElementById("info").innerText = `Joueur ${joueurActuelIndex + 1} - Cartes à jouer: ${cartesAJouerRestantes} - Deck: ${etatPartie.deck?.length || 0} cartes`;
   document.getElementById("btnFinTour").disabled = cartesAJouerRestantes > 0;
   document.getElementById("btnFinTour").onclick = finTour;
   document.getElementById("btnFinTour").style.display = "";
@@ -796,46 +813,92 @@ async function poserCarteFirebase(pile) {
 }
 
 async function finTour() {
-  if (etatPartie.cartesAJouer > 0) {
-    alert(`Vous devez jouer encore ${etatPartie.cartesAJouer} carte(s)`);
-    return;
-  }
-  updateLastActive();
-  let mains = [...etatPartie.mains];
-  let deck = [...etatPartie.deck];
-  const mainIndex = joueurs[pseudo].mainIndex;
-  let main = [...mains[mainIndex]];
-  while (main.length < 8 && deck.length > 0) {
-    main.push(deck.pop());
-  }
-  mains[mainIndex] = main;
+    if (etatPartie.cartesAJouer > 0) {
+        alert(`Vous devez jouer encore ${etatPartie.cartesAJouer} carte(s)`);
+        return;
+    }
+    updateLastActive();
+    let mains = [...etatPartie.mains];
+    let deck = [...etatPartie.deck];
+    const mainIndex = joueurs[pseudo].mainIndex;
+    let main = [...mains[mainIndex]];
 
-  let joueurCount = Object.keys(joueurs).length;
-  let nouveauJoueur = (etatPartie.joueurActuel + 1) % joueurCount;
+    // Vérification de la main vide pour le bonus
+    const mainVideAvantPioche = main.length === 0;
 
-  const joueursActifsIndexes = Object.values(joueurs).map(j => j.mainIndex).sort((a,b)=>a-b);
-  let originalNouveauJoueurIndex = nouveauJoueur;
-  let foundNext = false;
-  for (let i = 0; i < joueurCount; i++) {
-      if (joueursActifsIndexes.includes(nouveauJoueur)) {
-          foundNext = true;
-          break;
-      }
-      nouveauJoueur = (nouveauJoueur + 1) % joueurCount;
-  }
-  if (!foundNext && joueursActifsIndexes.length > 0) {
-      nouveauJoueur = joueursActifsIndexes[0];
-  } else if (joueursActifsIndexes.length === 0) {
-      return;
-  }
+    // Pioche les cartes pour revenir à 8 (ou moins si le deck est vide)
+    while (main.length < 8 && deck.length > 0) {
+        main.push(deck.pop());
+    }
+    mains[mainIndex] = main;
 
-  await db.ref(`parties/${partieId}`).update({
-    mains: mains,
-    deck: deck,
-    joueurActuel: nouveauJoueur,
-    cartesAJouer: Math.min(3, mains[nouveauJoueur]?.length || 0),
-    lastActive: Date.now()
-  });
+    let nouveauCartesAJouer;
+    if (mainVideAvantPioche && main.length > 0) {
+        // Bonus: 3 cartes supplémentaires à jouer si la main était vide avant la pioche
+        nouveauCartesAJouer = Math.min(3, main.length) + 3;
+        showNotification("Bonus ! Vous avez vidé votre main, +3 cartes à jouer ce tour !");
+    } else {
+        // Nombre de cartes normal pour le prochain tour
+        nouveauCartesAJouer = Math.min(3, main.length);
+    }
+
+    // Vérification de la condition de victoire (si toutes les mains sont vides ET le deck est vide)
+    const toutesMainsVides = mains.every(m => m.length === 0);
+    if (toutesMainsVides && deck.length === 0) {
+        await db.ref(`parties/${partieId}`).update({
+            etat: "terminee", // Met la partie en "terminee"
+            mains: mains, // Sauvegarde les mains finales
+            deck: deck, // Sauvegarde le deck vide
+            joueurActuel: etatPartie.joueurActuel, // Le joueur qui a joué la dernière carte
+            cartesAJouer: 0, // Plus de cartes à jouer
+            lastActive: Date.now()
+        });
+        afficherMessage("Victoire collective !"); // Affiche un message de victoire
+        // Vous pouvez ajouter ici un appel à une fonction pour afficher un modal de victoire
+        return; // Termine la fonction car la partie est finie
+    }
+
+    // Logique pour passer au joueur suivant
+    let joueurCount = Object.keys(joueurs).length;
+    let nouveauJoueurIndexCourant = etatPartie.joueurActuel; // L'index du joueur actuel
+    let nextPlayerMainIndex = -1;
+
+    // Récupérer et trier les index des mains des joueurs actifs
+    const joueursActifsIndexes = Object.values(joueurs)
+                                    .map(j => j.mainIndex)
+                                    .sort((a,b)=>a-b);
+
+    // Trouver l'index du joueur suivant valide parmi les joueurs actifs
+    for (let i = 0; i < joueurCount; i++) {
+        nouveauJoueurIndexCourant = (nouveauJoueurIndexCourant + 1);
+        // Assurez-vous de cycler les index correctement (0, 1, 2, 3...)
+        if (nouveauJoueurIndexCourant >= 4) { // Assumant 4 index de main possibles (0 à 3)
+            nouveauJoueurIndexCourant = 0;
+        }
+
+        if (joueursActifsIndexes.includes(nouveauJoueurIndexCourant)) {
+            nextPlayerMainIndex = nouveauJoueurIndexCourant;
+            break;
+        }
+    }
+
+    // Fallback si, pour une raison quelconque, aucun joueur suivant n'est trouvé (ne devrait pas arriver si joueursActifsIndexes n'est pas vide)
+    if (nextPlayerMainIndex === -1 && joueursActifsIndexes.length > 0) {
+        nextPlayerMainIndex = joueursActifsIndexes[0]; // Retourne au premier joueur actif
+    } else if (joueursActifsIndexes.length === 0) {
+        // Aucun joueur actif, cas d'erreur grave ou de fin de partie inattendue
+        console.error("Plus de joueurs actifs dans la partie.");
+        return;
+    }
+
+
+    await db.ref(`parties/${partieId}`).update({
+        mains: mains,
+        deck: deck,
+        joueurActuel: nextPlayerMainIndex, // Le prochain joueur
+        cartesAJouer: Math.min(3, mains[nextPlayerMainIndex]?.length || 0), // Cartes à jouer pour le prochain joueur
+        lastActive: Date.now()
+    });
 }
 
 function afficherGameOverMulti() {
